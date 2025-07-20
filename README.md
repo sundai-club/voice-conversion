@@ -23,6 +23,7 @@ A powerful Electron app that creates a virtual microphone with real-time audio p
 
 2. Install dependencies:
    ```bash
+   brew install blackhole-2ch # reboot after this one!
    npm install
    ```
 

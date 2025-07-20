@@ -14,5 +14,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     getSonioxApiKey: async () => {
         return await ipcRenderer.invoke('get-soniox-api-key');
+    },
+    getElevenLabsApiKey: async () => {
+        return await ipcRenderer.invoke('get-elevenlabs-api-key');
+    },
+    initElevenLabs: async () => {
+        return await ipcRenderer.invoke('init-elevenlabs');
+    },
+    convertTextToSpeech: async (text) => {
+        return await ipcRenderer.invoke('elevenlabs-tts', text);
+    },
+    stopTextToSpeech: async () => {
+        return await ipcRenderer.invoke('stop-elevenlabs-tts');
+    },
+    onElevenLabsAudioChunk: (callback) => {
+        ipcRenderer.on('elevenlabs-audio-chunk', (event, chunk) => {
+            callback(chunk);
+        });
     }
 });

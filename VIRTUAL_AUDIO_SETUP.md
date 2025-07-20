@@ -5,7 +5,7 @@ To use this app as a system-wide virtual microphone, you need to install a virtu
 ## macOS Setup
 
 ### Option 1: BlackHole (Recommended - Free)
-1. Download BlackHole from: https://github.com/ExistentialAudio/BlackHole
+1. Download BlackHole from: https://github.com/ExistentialAudio/BlackHole or `brew install blackhole-2ch`
 2. Install the .pkg file
 3. BlackHole will appear as an audio device in System Preferences > Sound
 

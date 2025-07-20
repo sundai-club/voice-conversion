@@ -1,9 +1,11 @@
 const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain } = require('electron');
 const path = require('path');
 require('dotenv').config();
+const ElevenLabsService = require('./elevenlabs-service');
 
 let tray = null;
 let window = null;
+let elevenLabsService = null;
 
 // Set up IPC handlers for console output
 ipcMain.handle('console-log', (event, message) => {
@@ -21,6 +23,79 @@ ipcMain.handle('console-warn', (event, message) => {
 // Handle API key requests from renderer
 ipcMain.handle('get-soniox-api-key', () => {
   return process.env.SONIOX_API_KEY || null;
+});
+
+ipcMain.handle('get-elevenlabs-api-key', () => {
+  return process.env.ELEVENLABS_API_KEY || null;
+});
+
+// Initialize ElevenLabs service
+ipcMain.handle('init-elevenlabs', async () => {
+  try {
+    const apiKey = process.env.ELEVENLABS_API_KEY;
+    if (!apiKey || apiKey === 'your_elevenlabs_api_key_here') {
+      throw new Error('Valid ElevenLabs API key not found in environment');
+    }
+
+    if (!elevenLabsService) {
+      elevenLabsService = new ElevenLabsService();
+    }
+
+    elevenLabsService.initialize(apiKey);
+    console.log('ElevenLabs service initialized');
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to initialize ElevenLabs:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Convert text to speech
+ipcMain.handle('elevenlabs-tts', async (event, text) => {
+  try {
+    if (!elevenLabsService) {
+      throw new Error('ElevenLabs service not initialized');
+    }
+
+    const chunks = [];
+    
+    await elevenLabsService.convertTextToSpeech(text, (chunk) => {
+      // Send chunk to renderer with validation
+      try {
+        if (!chunk || chunk.length === 0) {
+          console.warn('Received empty chunk from ElevenLabs');
+          return;
+        }
+        
+        if (window && !window.isDestroyed() && 
+            window.webContents && !window.webContents.isDestroyed() &&
+            !window.webContents.isLoading()) {
+          
+          // Convert Buffer to Uint8Array for safer transmission
+          const uint8Array = new Uint8Array(chunk);
+          window.webContents.send('elevenlabs-audio-chunk', uint8Array);
+        } else {
+          console.warn('Window not ready for audio chunk');
+        }
+      } catch (error) {
+        console.error('Error sending audio chunk:', error.message);
+        // Don't crash the process, just log and continue
+      }
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error('TTS error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Stop TTS
+ipcMain.handle('stop-elevenlabs-tts', async () => {
+  if (elevenLabsService) {
+    elevenLabsService.stop();
+  }
+  return { success: true };
 });
 
 function createWindow() {
