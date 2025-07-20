@@ -14,7 +14,7 @@
             border-radius: 8px;
             border: 1px solid rgba(0, 0, 0, 0.1);
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-            max-height: 400px;
+            max-height: 800px;
             overflow-y: auto;
         }
 
@@ -320,10 +320,18 @@
                 option.disabled = true;
                 select.appendChild(option);
             } else {
-                devices.forEach(device => {
+                devices.forEach((device, index) => {
                     const option = document.createElement('option');
                     option.value = device.deviceId;
                     option.textContent = device.label || 'Unnamed Virtual Device';
+                    
+                    // Preselect the first virtual device
+                    if (index === 0) {
+                        option.selected = true;
+                        selectedVirtualOutputId = device.deviceId;
+                        console.log('Preselected virtual device:', device.label);
+                    }
+                    
                     select.appendChild(option);
                 });
             }
@@ -347,6 +355,9 @@
                 this.inputStream = null;
                 this.audioContext = null;
                 this.sourceNode = null;
+                this.beepNode = null;
+                this.beepGainNode = null;
+                this.beepInterval = null;
                 this.destinationNode = null;
                 this.outputStream = null;
                 this.outputAudio = null;
@@ -477,20 +488,155 @@
 
             createSimpleProcessingChain(sourceNode) {
                 try {
-                    // Create a simple gain node for now
-                    const gainNode = this.audioContext.createGain();
-                    gainNode.gain.value = 1.0; // Pass-through for now
+                    // Create beep generator only (no noise)
+                    this.beepNode = this.createBeepNode();
                     
-                    console.log('Created simple processing chain with gain node');
+                    // Create gain nodes for mixing
+                    const signalGain = this.audioContext.createGain();
+                    const beepGain = this.audioContext.createGain();
+                    const outputGain = this.audioContext.createGain();
                     
-                    // Connect source to gain
-                    sourceNode.connect(gainNode);
+                    // Set gain values - 80% signal, 20% beep for louder beeps
+                    signalGain.gain.value = 0.8;
+                    beepGain.gain.value = 0.2;
+                    outputGain.gain.value = 1.0;
                     
-                    return gainNode;
+                    // Connect the audio graph
+                    sourceNode.connect(signalGain);
+                    this.beepNode.connect(beepGain);
+                    
+                    signalGain.connect(outputGain);
+                    beepGain.connect(outputGain);
+                    
+                    console.log('Created processing chain with beeps only (no noise)');
+                    
+                    return outputGain;
                 } catch (error) {
                     console.error('Error creating processing chain:', error);
-                    // Return source node directly if processing fails
-                    return sourceNode;
+                    // Fallback to simple gain node
+                    const gainNode = this.audioContext.createGain();
+                    gainNode.gain.value = 1.0;
+                    sourceNode.connect(gainNode);
+                    return gainNode;
+                }
+            }
+
+            createNoiseNode() {
+                try {
+                    // Create a buffer for white noise
+                    const bufferSize = this.audioContext.sampleRate * 2; // 2 seconds of noise
+                    const noiseBuffer = this.audioContext.createBuffer(1, bufferSize, this.audioContext.sampleRate);
+                    const output = noiseBuffer.getChannelData(0);
+                    
+                    // Generate white noise
+                    for (let i = 0; i < bufferSize; i++) {
+                        output[i] = Math.random() * 2 - 1; // Random values between -1 and 1
+                    }
+                    
+                    // Create buffer source and set it to loop
+                    const noiseSource = this.audioContext.createBufferSource();
+                    noiseSource.buffer = noiseBuffer;
+                    noiseSource.loop = true;
+                    noiseSource.start(0);
+                    
+                    console.log('Created noise generator node');
+                    
+                    return noiseSource;
+                } catch (error) {
+                    console.error('Error creating noise node:', error);
+                    // Return a silent gain node as fallback
+                    const silentGain = this.audioContext.createGain();
+                    silentGain.gain.value = 0;
+                    return silentGain;
+                }
+            }
+
+            createBeepNode() {
+                try {
+                    // Create a gain node to control beep volume
+                    const beepGain = this.audioContext.createGain();
+                    beepGain.gain.value = 1.0; // Set to 1.0 so beeps can be heard
+                    
+                    // Store reference for cleanup
+                    this.beepGainNode = beepGain;
+                    
+                    // Start beep scheduling
+                    this.startBeepScheduling();
+                    
+                    console.log('Created beep generator node with gain 1.0');
+                    
+                    return beepGain;
+                } catch (error) {
+                    console.error('Error creating beep node:', error);
+                    // Return a silent gain node as fallback
+                    const silentGain = this.audioContext.createGain();
+                    silentGain.gain.value = 0;
+                    return silentGain;
+                }
+            }
+
+            startBeepScheduling() {
+                try {
+                    this.stopBeepScheduling(); // Clear any existing schedule
+                    
+                    const createBeep = () => {
+                        if (!this.isActive || !this.beepGainNode) return;
+                        
+                        try {
+                            // Create a new oscillator for each beep (oscillators are one-time use)
+                            const oscillator = this.audioContext.createOscillator();
+                            oscillator.frequency.value = 800; // 800Hz beep tone
+                            oscillator.type = 'sine';
+                            
+                            // Create a dedicated gain node for this beep
+                            const singleBeepGain = this.audioContext.createGain();
+                            singleBeepGain.gain.value = 1.0; // Full volume for beep
+                            
+                            // Connect: oscillator -> beep gain -> main beep gain
+                            oscillator.connect(singleBeepGain);
+                            singleBeepGain.connect(this.beepGainNode);
+                            
+                            const currentTime = this.audioContext.currentTime;
+                            const beepDuration = 0.2; // 200ms beep for better audibility
+                            
+                            // Start and stop the oscillator
+                            oscillator.start(currentTime);
+                            oscillator.stop(currentTime + beepDuration);
+                            
+                            // Clean up after beep ends
+                            oscillator.onended = () => {
+                                try {
+                                    singleBeepGain.disconnect();
+                                } catch (e) {
+                                    // Ignore cleanup errors
+                                }
+                            };
+                            
+                            console.log('Beep triggered at', currentTime);
+                            
+                        } catch (error) {
+                            console.error('Error creating individual beep:', error);
+                        }
+                    };
+                    
+                    // Create beeps every 3 seconds
+                    this.beepInterval = setInterval(createBeep, 3000);
+                    
+                    // Create the first beep immediately
+                    setTimeout(createBeep, 100); // Small delay to ensure audio context is ready
+                    
+                    console.log('Started beep scheduling every 3 seconds');
+                    
+                } catch (error) {
+                    console.error('Error starting beep scheduling:', error);
+                }
+            }
+
+            stopBeepScheduling() {
+                if (this.beepInterval) {
+                    clearInterval(this.beepInterval);
+                    this.beepInterval = null;
+                    console.log('Stopped beep scheduling');
                 }
             }
 
@@ -501,6 +647,12 @@
                 }
 
                 try {
+                    // Set isActive to false first to stop beep scheduling
+                    this.isActive = false;
+                    
+                    // Stop beep scheduling
+                    this.stopBeepScheduling();
+                    
                     if (this.outputAudio) {
                         this.outputAudio.pause();
                         this.outputAudio.srcObject = null;
@@ -517,12 +669,21 @@
                         this.sourceNode = null;
                     }
                     
+                    if (this.beepNode) {
+                        this.beepNode.disconnect();
+                        this.beepNode = null;
+                    }
+                    
+                    if (this.beepGainNode) {
+                        this.beepGainNode.disconnect();
+                        this.beepGainNode = null;
+                    }
+                    
                     if (this.destinationNode) {
                         this.destinationNode = null;
                     }
                     
                     this.outputStream = null;
-                    this.isActive = false;
                     
                     console.log('Virtual microphone stopped');
                     
