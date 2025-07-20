@@ -16,7 +16,6 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@elevenlabs/elevenlabs-js": "^2.6.0",
     "dotenv": "^17.2.0",
     "node-wav": "^0.0.2"
   },

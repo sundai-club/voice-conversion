@@ -323,27 +323,6 @@
             font-style: italic;
         }
 
-        .tts-controls {
-            margin-bottom: 12px;
-        }
-
-        .tts-toggle {
-            display: flex;
-            align-items: center;
-            font-size: 12px;
-            color: #333;
-            cursor: pointer;
-            user-select: none;
-        }
-
-        .tts-toggle input[type="checkbox"] {
-            margin-right: 8px;
-            cursor: pointer;
-        }
-
-        .tts-toggle span {
-            cursor: pointer;
-        }
     </style>
 </head>
 <body>
@@ -394,18 +373,7 @@
             <button id="saveApiKey" onclick="saveApiKey()">Save</button>
         </div>
         
-        <div class="api-key-input" id="elevenLabsKeyInput" style="display: none;">
-            <label for="elevenLabsApiKey">ElevenLabs API Key:</label>
-            <input type="password" id="elevenLabsApiKey" placeholder="Enter your ElevenLabs API key..." />
-            <button id="saveElevenLabsKey" onclick="saveElevenLabsApiKey()">Save</button>
-        </div>
         
-        <div class="tts-controls">
-            <label class="tts-toggle">
-                <input type="checkbox" id="ttsEnabled" checked>
-                <span>🔊 ElevenLabs TTS to virtual mic</span>
-            </label>
-        </div>
 
         <div class="transcription-output">
             <div id="transcriptionText" class="transcription-text">
@@ -548,17 +516,10 @@
                 this.finalTranscript = '';
                 this.interimTranscript = '';
                 this.mediaRecorder = null;
-                this.elevenLabsActive = false;
-                this.lastSpokenText = '';
-                this.ttsEnabled = true;
-                this.audioQueue = [];
-                this.isPlaying = false;
             }
 
             async initialize() {
                 try {
-                    // Don't create AudioContext immediately, create it when needed
-                    this.initializeTTS();
                     return true;
                 } catch (error) {
                     console.error('Failed to initialize virtual microphone:', error);
@@ -566,73 +527,7 @@
                 }
             }
 
-            initializeTTS() {
-                try {
-                    console.log('✅ ElevenLabs TTS initialized');
-                } catch (error) {
-                    console.error('Error initializing TTS:', error);
-                }
-            }
 
-            async initializeElevenLabs() {
-                try {
-                    console.log('Initializing ElevenLabs service...');
-                    
-                    if (!window.electronAPI) {
-                        console.warn('Electron API not available');
-                        return false;
-                    }
-
-                    // Initialize ElevenLabs in main process
-                    const result = await window.electronAPI.initElevenLabs();
-                    
-                    if (!result.success) {
-                        console.error('Failed to initialize ElevenLabs:', result.error);
-                        
-                        // Show the API key input if needed
-                        if (result.error.includes('API key')) {
-                            const keySection = document.getElementById('elevenLabsKeyInput');
-                            if (keySection) {
-                                keySection.style.display = 'block';
-                            }
-                        }
-                        return false;
-                    }
-
-                    // Set up audio chunk listener with robust error handling
-                    window.electronAPI.onElevenLabsAudioChunk((chunk) => {
-                        try {
-                            if (!chunk || chunk.length === 0) {
-                                console.warn('Received empty audio chunk');
-                                return;
-                            }
-                            
-                            console.log('Received audio chunk of size:', chunk.length);
-                            
-                            // Process audio with timeout protection
-                            setTimeout(() => {
-                                try {
-                                    const arrayBuffer = new Uint8Array(chunk).buffer;
-                                    this.handleElevenLabsAudio(arrayBuffer);
-                                } catch (asyncError) {
-                                    console.error('Async audio processing error:', asyncError);
-                                }
-                            }, 1);
-                            
-                        } catch (error) {
-                            console.error('Error processing audio chunk:', error);
-                        }
-                    });
-
-                    this.elevenLabsActive = true;
-                    console.log('ElevenLabs service initialized successfully');
-                    return true;
-
-                } catch (error) {
-                    console.error('Error initializing ElevenLabs:', error);
-                    return false;
-                }
-            }
 
             async startTranscription() {
                 let apiKey = null;
@@ -736,10 +631,6 @@
                 this.interimTranscript = newInterimText;
                 this.updateTranscriptionDisplay();
 
-                // Speak new final text if TTS is enabled
-                if (hasNewFinalText && this.ttsEnabled && newFinalText.trim()) {
-                    this.speakText(newFinalText.trim());
-                }
 
                 if (response.finished) {
                     console.log('Transcription finished');
@@ -806,196 +697,9 @@
                 }
             }
 
-            async speakText(text) {
-                if (!text || text === this.lastSpokenText || !this.ttsEnabled) {
-                    return;
-                }
 
-                try {
-                    // Initialize ElevenLabs if not already done
-                    if (!this.elevenLabsActive) {
-                        const initialized = await this.initializeElevenLabs();
-                        if (!initialized) {
-                            console.warn('Could not initialize ElevenLabs');
-                            return;
-                        }
-                    }
 
-                    console.log(`🗣️ Speaking via ElevenLabs: "${text}"`);
-                    this.lastSpokenText = text;
 
-                    // Send text to ElevenLabs service
-                    if (window.electronAPI) {
-                        const result = await window.electronAPI.convertTextToSpeech(text);
-                        if (!result.success) {
-                            console.error('Failed to convert text to speech:', result.error);
-                        }
-                    }
-
-                } catch (error) {
-                    console.error('Error speaking text:', error);
-                }
-            }
-
-            handleElevenLabsAudio(audioData) {
-                try {
-                    if (!audioData || audioData.byteLength === 0) {
-                        console.warn('Received invalid audio data');
-                        return;
-                    }
-                    
-                    // Check if we have a valid audio context and TTS system
-                    if (!this.audioContext || !this.ttsGainNode) {
-                        console.warn('Audio context not ready for TTS playback');
-                        return;
-                    }
-                    
-                    // Limit queue size to prevent memory issues
-                    if (this.audioQueue.length > 10) {
-                        console.warn('Audio queue full, dropping oldest chunks');
-                        this.audioQueue = this.audioQueue.slice(-5); // Keep only last 5 chunks
-                    }
-                    
-                    // Add audio data to queue
-                    this.audioQueue.push(audioData);
-                    
-                    // Start playback if not already playing
-                    if (!this.isPlaying) {
-                        this.playAudioQueue();
-                    }
-                } catch (error) {
-                    console.error('Error handling ElevenLabs audio:', error);
-                    // Clear queue on error to prevent cascading issues
-                    this.audioQueue = [];
-                    this.isPlaying = false;
-                }
-            }
-
-            async playAudioQueue() {
-                if (this.isPlaying || this.audioQueue.length === 0) {
-                    return;
-                }
-
-                this.isPlaying = true;
-
-                try {
-                    while (this.audioQueue.length > 0) {
-                        const audioData = this.audioQueue.shift();
-                        
-                        // Check if audio context is still valid
-                        if (!this.audioContext || this.audioContext.state === 'closed') {
-                            console.warn('Audio context closed, stopping playback');
-                            break;
-                        }
-                        
-                        await this.playAudioChunk(audioData);
-                    }
-                } catch (error) {
-                    console.error('Error playing audio queue:', error);
-                    // Clear queue on error
-                    this.audioQueue = [];
-                } finally {
-                    this.isPlaying = false;
-                }
-            }
-
-            async playAudioChunk(audioData) {
-                if (!this.audioContext || !this.ttsGainNode) {
-                    console.warn('Audio context or TTS gain node not available');
-                    return;
-                }
-
-                try {
-                    // Validate audio data
-                    if (!audioData || audioData.byteLength === 0) {
-                        console.warn('Invalid audio data for playback');
-                        return;
-                    }
-                    
-                    console.log('Decoding real ElevenLabs audio chunk');
-                    
-                    // Resume audio context if suspended
-                    if (this.audioContext.state === 'suspended') {
-                        await this.audioContext.resume();
-                    }
-                    
-                    // Check if audio context is still valid
-                    if (this.audioContext.state === 'closed') {
-                        console.warn('Audio context is closed, cannot play audio');
-                        return;
-                    }
-                    
-                    // Create a copy of the audio data to avoid any reference issues
-                    const audioCopy = audioData.slice(0);
-                    
-                    // Decode MP3 audio data with proper error handling
-                    let audioBuffer;
-                    try {
-                        audioBuffer = await this.audioContext.decodeAudioData(audioCopy);
-                    } catch (decodeError) {
-                        console.error('Failed to decode audio data:', decodeError);
-                        // Fallback to a short beep if decode fails
-                        this.playFallbackBeep();
-                        return;
-                    }
-                    
-                    // Create buffer source
-                    const source = this.audioContext.createBufferSource();
-                    source.buffer = audioBuffer;
-                    
-                    // Connect to TTS gain node
-                    source.connect(this.ttsGainNode);
-                    
-                    // Enable TTS channel
-                    this.ttsGainNode.gain.value = 1.0;
-                    
-                    // Play the audio
-                    source.start(0);
-                    
-                    // Wait for playback to complete
-                    await new Promise((resolve) => {
-                        source.onended = resolve;
-                        
-                        // Add a safety timeout
-                        setTimeout(() => {
-                            try {
-                                source.stop();
-                            } catch (e) {
-                                // Ignore if already stopped
-                            }
-                            resolve();
-                        }, audioBuffer.duration * 1000 + 1000); // Duration + 1 second buffer
-                    });
-                    
-                    console.log('Real TTS audio playback completed');
-
-                } catch (error) {
-                    console.error('Error playing audio chunk:', error);
-                    // Play fallback beep on any error
-                    this.playFallbackBeep();
-                }
-            }
-            
-            playFallbackBeep() {
-                try {
-                    if (!this.audioContext || !this.ttsGainNode) return;
-                    
-                    const oscillator = this.audioContext.createOscillator();
-                    const gainNode = this.audioContext.createGain();
-                    
-                    oscillator.frequency.value = 800; // Higher pitch for error indication
-                    oscillator.type = 'sine';
-                    gainNode.gain.value = 0.1; // Low volume
-                    
-                    oscillator.connect(gainNode);
-                    gainNode.connect(this.ttsGainNode);
-                    
-                    oscillator.start(0);
-                    oscillator.stop(this.audioContext.currentTime + 0.1); // Short beep
-                } catch (error) {
-                    console.error('Error playing fallback beep:', error);
-                }
-            }
 
             stopTranscription() {
                 if (this.transcriptionWs) {
@@ -1016,15 +720,6 @@
                     this.audioProcessor = null;
                 }
 
-                // Stop ElevenLabs
-                if (this.elevenLabsActive && window.electronAPI) {
-                    window.electronAPI.stopTextToSpeech();
-                    this.elevenLabsActive = false;
-                }
-
-                // Clear audio queue
-                this.audioQueue = [];
-                this.isPlaying = false;
 
                 this.transcriptionActive = false;
                 updateTranscriptionStatus('Stopped', false);
@@ -1148,30 +843,22 @@
 
             createSimpleProcessingChain(sourceNode) {
                 try {
-                    // Create TTS audio source instead of using original microphone
-                    this.ttsAudioSource = this.createTTSAudioSource();
-                    
                     // Create beep generator
                     this.beepNode = this.createBeepNode();
                     
-                    // Create gain nodes for mixing
-                    const ttsGain = this.audioContext.createGain();
+                    // Create gain nodes
                     const beepGain = this.audioContext.createGain();
                     const outputGain = this.audioContext.createGain();
                     
-                    // Set gain values - prioritize TTS audio over beeps
-                    ttsGain.gain.value = 0.9;  // TTS audio at 90%
+                    // Set gain values
                     beepGain.gain.value = 0.1; // Beeps at 10% 
                     outputGain.gain.value = 1.0;
                     
-                    // Connect the audio graph - TTS instead of original mic
-                    this.ttsAudioSource.connect(ttsGain);
+                    // Connect the audio graph - just beeps
                     this.beepNode.connect(beepGain);
-                    
-                    ttsGain.connect(outputGain);
                     beepGain.connect(outputGain);
                     
-                    console.log('Created processing chain with TTS audio instead of microphone');
+                    console.log('Created processing chain with beeps only');
                     
                     return outputGain;
                 } catch (error) {
@@ -1185,36 +872,6 @@
                 }
             }
 
-            createTTSAudioSource() {
-                try {
-                    // Create a silent audio source that we can control
-                    const bufferSize = this.audioContext.sampleRate * 0.1; // 100ms buffer
-                    const silentBuffer = this.audioContext.createBuffer(1, bufferSize, this.audioContext.sampleRate);
-                    
-                    // Create a gain node that we can control for TTS audio
-                    const ttsGain = this.audioContext.createGain();
-                    ttsGain.gain.value = 0.0; // Start silent
-                    
-                    // Create a buffer source for the silent audio
-                    const bufferSource = this.audioContext.createBufferSource();
-                    bufferSource.buffer = silentBuffer;
-                    bufferSource.loop = true;
-                    bufferSource.connect(ttsGain);
-                    bufferSource.start(0);
-                    
-                    // Store reference for TTS control
-                    this.ttsGainNode = ttsGain;
-                    
-                    console.log('Created TTS audio source');
-                    return ttsGain;
-                } catch (error) {
-                    console.error('Error creating TTS audio source:', error);
-                    // Return a silent gain node as fallback
-                    const silentGain = this.audioContext.createGain();
-                    silentGain.gain.value = 0;
-                    return silentGain;
-                }
-            }
 
             createNoiseNode() {
                 try {
@@ -1423,27 +1080,6 @@
             }
         }
 
-        function saveElevenLabsApiKey() {
-            const apiKeyInput = document.getElementById('elevenLabsApiKey');
-            const apiKey = apiKeyInput.value.trim();
-            
-            if (apiKey) {
-                localStorage.setItem('elevenLabsApiKey', apiKey);
-                console.log('ElevenLabs API key saved');
-                
-                // Clear the input for security
-                apiKeyInput.value = '';
-                alert('ElevenLabs API key saved successfully!');
-                
-                // Hide the input section
-                const keySection = document.getElementById('elevenLabsKeyInput');
-                if (keySection) {
-                    keySection.style.display = 'none';
-                }
-            } else {
-                alert('Please enter a valid API key');
-            }
-        }
 
         async function loadSavedApiKey() {
             let hasApiKey = false;
@@ -1483,29 +1119,6 @@
             }
         }
 
-        function setupTTSToggle() {
-            const ttsToggle = document.getElementById('ttsEnabled');
-            if (ttsToggle) {
-                ttsToggle.addEventListener('change', (event) => {
-                    const enabled = event.target.checked;
-                    if (virtualMicrophone) {
-                        virtualMicrophone.ttsEnabled = enabled;
-                        console.log(`TTS ${enabled ? 'enabled' : 'disabled'}`);
-                    }
-                });
-                
-                // Load saved preference
-                const savedPreference = localStorage.getItem('ttsEnabled');
-                if (savedPreference !== null) {
-                    ttsToggle.checked = savedPreference === 'true';
-                }
-                
-                // Save preference when changed
-                ttsToggle.addEventListener('change', (event) => {
-                    localStorage.setItem('ttsEnabled', event.target.checked);
-                });
-            }
-        }
 
         // Virtual microphone control functions
         async function toggleVirtualMic() {
@@ -1756,7 +1369,6 @@
                 // Initialize transcription UI
                 await loadSavedApiKey();
                 updateTranscriptionStatus('Stopped', false);
-                setupTTSToggle();
                 
                 // Check virtual mic status periodically
                 setInterval(updateVirtualMicStatus, 1000);
