@@ -11,10 +11,11 @@
             font-size: 14px;
             background: rgba(255, 255, 255, 0.95);
             backdrop-filter: blur(10px);
-            border-radius: 8px;
-            border: 1px solid rgba(0, 0, 0, 0.1);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-            overflow: hidden;
+            /*border-radius: 8px;*/
+            /*border: 1px solid rgba(0, 0, 0, 0.1);*/
+            /*box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);*/
+            max-height: 800px;
+            overflow-y: auto;
         }
 
         .header {
@@ -272,6 +273,46 @@
     </div>
 
     <script>
+        // Override console to route all output to main process CLI IMMEDIATELY
+        const originalConsole = {
+            log: console.log,
+            error: console.error,
+            warn: console.warn
+        };
+        
+        // Set up console override right away
+        (function() {
+            console.log = function(...args) {
+                const message = args.join(' ');
+                if (window.electronAPI) {
+                    window.electronAPI.logToMain(message);
+                } else {
+                    originalConsole.log(...args);
+                }
+            };
+            
+            console.error = function(...args) {
+                const message = args.join(' ');
+                if (window.electronAPI) {
+                    window.electronAPI.logError(message);
+                } else {
+                    originalConsole.error(...args);
+                }
+            };
+            
+            console.warn = function(...args) {
+                const message = args.join(' ');
+                if (window.electronAPI) {
+                    window.electronAPI.logWarn(message);
+                } else {
+                    originalConsole.warn(...args);
+                }
+            };
+        })();
+        
+        // Test console output immediately
+        // Console output routing initialized
+
         let microphones = [];
         let selectedMicrophoneId = null;
         let virtualMicActive = false;
@@ -296,7 +337,7 @@
                     return virtualDeviceNames.some(keyword => name.includes(keyword));
                 });
                 
-                console.log('Found virtual output devices:', virtualDevices);
+                // Found virtual output devices
                 return virtualDevices;
                 
             } catch (error) {
@@ -328,7 +369,7 @@
                     if (index === 0) {
                         option.selected = true;
                         selectedVirtualOutputId = device.deviceId;
-                        console.log('Preselected virtual device:', device.label);
+                        // Preselected virtual device
                     }
                     
                     select.appendChild(option);
@@ -365,13 +406,15 @@
             async initialize() {
                 try {
                     // Don't create AudioContext immediately, create it when needed
-                    console.log('Virtual microphone initialized (lazy initialization)');
                     return true;
                 } catch (error) {
                     console.error('Failed to initialize virtual microphone:', error);
                     return false;
                 }
             }
+
+
+
 
             async start(deviceId, outputDeviceId = null) {
                 if (this.isActive) {
@@ -691,21 +734,8 @@
                 }
             }
 
-            getVirtualStream() {
-                return this.outputStream;
-            }
-
             isRunning() {
                 return this.isActive;
-            }
-
-            async destroy() {
-                await this.stop();
-                
-                if (this.audioContext) {
-                    await this.audioContext.close();
-                    this.audioContext = null;
-                }
             }
         }
 

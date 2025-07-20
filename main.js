@@ -1,13 +1,26 @@
-const { app, BrowserWindow, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain } = require('electron');
 const path = require('path');
 
 let tray = null;
 let window = null;
 
+// Set up IPC handlers for console output
+ipcMain.handle('console-log', (event, message) => {
+  console.log(message);
+});
+
+ipcMain.handle('console-error', (event, message) => {
+  console.error(message);
+});
+
+ipcMain.handle('console-warn', (event, message) => {
+  console.warn(message);
+});
+
 function createWindow() {
   window = new BrowserWindow({
     width: 350,
-    height: 600,
+    height: 700,
     show: false,
     frame: false,
     fullscreenable: false,
@@ -16,7 +29,10 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js')
+      preload: path.join(__dirname, 'preload.js'),
+      experimentalFeatures: true,
+      enableRemoteModule: false,
+      webSecurity: false
     }
   });
 
@@ -69,6 +85,17 @@ function createTray() {
       click: () => {
         if (window) {
           window.webContents.reload();
+        }
+      }
+    },
+    {
+      type: 'separator'
+    },
+    {
+      label: 'Open DevTools',
+      click: () => {
+        if (window) {
+          window.webContents.openDevTools();
         }
       }
     },
