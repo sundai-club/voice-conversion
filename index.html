@@ -462,7 +462,7 @@
         let virtualOutputDevices = [];
         let selectedVirtualOutputId = null;
         let availableVoices = [];
-        let selectedVoiceId = 'JBFqnCBsd6RMkjVDRZzb'; // Default voice
+        let selectedVoiceId = localStorage.getItem('selectedVoiceId') || 'JBFqnCBsd6RMkjVDRZzb'; // Load saved voice or default
         let debugBeepsEnabled = true; // Default to enabled
 
         // Function to detect virtual audio output devices
@@ -1340,11 +1340,11 @@
                 voiceSelect.appendChild(langGroup);
             });
             
-            // Set default selection
-            const savedVoiceId = localStorage.getItem('selectedVoiceId') || selectedVoiceId;
-            if (savedVoiceId) {
-                voiceSelect.value = savedVoiceId;
-                updateVoiceDetails(savedVoiceId);
+            // Set default selection to previously saved voice
+            if (selectedVoiceId) {
+                voiceSelect.value = selectedVoiceId;
+                updateVoiceDetails(selectedVoiceId);
+                console.log('Restored selected voice:', selectedVoiceId);
             }
             
             // Add change listener
