@@ -14,26 +14,43 @@ function createWindow() {
     resizable: false,
     transparent: true,
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js')
     }
   });
 
   window.loadFile('index.html');
 
   window.on('blur', () => {
-    if (!window.webContents.isDevToolsOpened()) {
-      window.hide();
-    }
+    // Add a small delay to prevent accidental hiding during click events
+    setTimeout(() => {
+      if (window && !window.isDestroyed() && !window.webContents.isDevToolsOpened()) {
+        window.hide();
+      }
+    }, 100);
+  });
+
+  window.webContents.on('crashed', (event, killed) => {
+    console.error('Renderer process crashed:', { killed });
+  });
+
+  window.on('unresponsive', () => {
+    console.error('Window became unresponsive');
+  });
+
+  window.webContents.on('render-process-gone', (event, details) => {
+    console.error('Render process gone:', details);
   });
 }
 
 function createTray() {
   // Use voice-search.png as the tray icon
-  const icon = nativeImage.createFromPath(path.join(__dirname, 'icon.svg'));
+  const icon = nativeImage.createFromPath(path.join(__dirname, 'icon.png'));
   // const icon = nativeImage.createFromPath('icon.svg');
-  // icon.setTemplateImage(true); // Makes icon adapt to menu bar theme
-  
+  icon.setTemplateImage(true); // Makes icon adapt to menu bar theme
+
+  //const icon = path.join(__dirname, 'icon.png')
   tray = new Tray(icon);
   
   const contextMenu = Menu.buildFromTemplate([

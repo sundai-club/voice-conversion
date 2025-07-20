@@ -133,6 +133,110 @@
             color: #999;
             font-style: italic;
         }
+
+        .virtual-mic-controls {
+            margin-top: 16px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(0, 0, 0, 0.1);
+        }
+
+        .virtual-output-select {
+            margin-top: 8px;
+        }
+
+        .virtual-output-select select {
+            width: 100%;
+            padding: 6px 8px;
+            border: 1px solid rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+            font-size: 12px;
+            background: white;
+        }
+
+        .virtual-output-select label {
+            display: block;
+            font-size: 11px;
+            color: #666;
+            margin-bottom: 4px;
+        }
+
+        .setup-info {
+            margin-top: 8px;
+            padding: 8px;
+            background: rgba(255, 193, 7, 0.1);
+            border: 1px solid rgba(255, 193, 7, 0.3);
+            border-radius: 4px;
+            font-size: 11px;
+            color: #856404;
+        }
+
+        .setup-info a {
+            color: #007AFF;
+            text-decoration: none;
+        }
+
+        .virtual-mic-status {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+
+        .status-dot.active {
+            background: #00C853;
+            box-shadow: 0 0 8px rgba(0, 200, 83, 0.4);
+        }
+
+        .status-dot.inactive {
+            background: #666;
+        }
+
+        .virtual-mic-btn {
+            background: #007AFF;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            padding: 8px 16px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            width: 100%;
+            margin-top: 8px;
+        }
+
+        .virtual-mic-btn:hover {
+            background: #0056b3;
+            transform: translateY(-1px);
+        }
+
+        .virtual-mic-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .virtual-mic-btn.stop {
+            background: #FF3B30;
+        }
+
+        .virtual-mic-btn.stop:hover {
+            background: #d32f2f;
+        }
     </style>
 </head>
 <body>
@@ -143,10 +247,409 @@
     
     <div id="status" class="status loading">Loading microphones...</div>
     <ul id="micList" class="mic-list"></ul>
+    
+    <div class="virtual-mic-controls">
+        <div class="virtual-mic-status">
+            <div class="status-indicator">
+                <div id="virtualMicDot" class="status-dot inactive"></div>
+                <span id="virtualMicStatusText">Virtual Mic: Stopped</span>
+            </div>
+        </div>
+        
+        <div class="virtual-output-select">
+            <label for="virtualOutputSelect">Virtual Audio Output:</label>
+            <select id="virtualOutputSelect">
+                <option value="">Select virtual audio device...</option>
+            </select>
+        </div>
+        
+        <button id="virtualMicBtn" class="virtual-mic-btn" onclick="toggleVirtualMic()">
+            Start Virtual Microphone
+        </button>
+        
+        <div class="setup-info">
+            ℹ️ Need a virtual audio device? <a href="#" onclick="showSetupInfo()">Setup Guide</a>
+        </div>
+    </div>
 
     <script>
         let microphones = [];
         let selectedMicrophoneId = null;
+        let virtualMicActive = false;
+        let virtualMicrophone = null;
+        let virtualOutputDevices = [];
+        let selectedVirtualOutputId = null;
+
+        // Function to detect virtual audio output devices
+        async function getVirtualOutputDevices() {
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const audioOutputs = devices.filter(device => device.kind === 'audiooutput');
+                
+                // Look for common virtual audio device names
+                const virtualDeviceNames = [
+                    'blackhole', 'loopback', 'virtual', 'cable', 'voicemeeter', 'vb-audio',
+                    'multi-output', 'aggregate', 'soundflower', 'jack'
+                ];
+                
+                const virtualDevices = audioOutputs.filter(device => {
+                    const name = device.label.toLowerCase();
+                    return virtualDeviceNames.some(keyword => name.includes(keyword));
+                });
+                
+                console.log('Found virtual output devices:', virtualDevices);
+                return virtualDevices;
+                
+            } catch (error) {
+                console.error('Error getting virtual output devices:', error);
+                return [];
+            }
+        }
+
+        async function populateVirtualOutputDevices() {
+            const select = document.getElementById('virtualOutputSelect');
+            const devices = await getVirtualOutputDevices();
+            
+            // Clear existing options except the first one
+            select.innerHTML = '<option value="">Select virtual audio device...</option>';
+            
+            if (devices.length === 0) {
+                const option = document.createElement('option');
+                option.value = 'none';
+                option.textContent = 'No virtual devices found - See setup guide';
+                option.disabled = true;
+                select.appendChild(option);
+            } else {
+                devices.forEach(device => {
+                    const option = document.createElement('option');
+                    option.value = device.deviceId;
+                    option.textContent = device.label || 'Unnamed Virtual Device';
+                    select.appendChild(option);
+                });
+            }
+            
+            virtualOutputDevices = devices;
+        }
+
+        function showSetupInfo() {
+            const message = `To create a system-wide virtual microphone, you need to install a virtual audio driver:\n\n` +
+                `macOS: Install BlackHole (free) from GitHub or Loopback (paid)\n` +
+                `Windows: Install VoiceMeeter or Virtual Audio Cable\n` +
+                `Linux: Use PulseAudio virtual sinks or JACK\n\n` +
+                `See VIRTUAL_AUDIO_SETUP.md for detailed instructions.`;
+            alert(message);
+        }
+
+        // Virtual Microphone Class  
+        class VirtualMicrophone {
+            constructor() {
+                this.isActive = false;
+                this.inputStream = null;
+                this.audioContext = null;
+                this.sourceNode = null;
+                this.destinationNode = null;
+                this.outputStream = null;
+                this.outputAudio = null;
+            }
+
+            async initialize() {
+                try {
+                    // Don't create AudioContext immediately, create it when needed
+                    console.log('Virtual microphone initialized (lazy initialization)');
+                    return true;
+                } catch (error) {
+                    console.error('Failed to initialize virtual microphone:', error);
+                    return false;
+                }
+            }
+
+            async start(deviceId, outputDeviceId = null) {
+                if (this.isActive) {
+                    await this.stop();
+                }
+
+                try {
+                    console.log('Starting virtual microphone with device:', deviceId);
+                    console.log('Output device:', outputDeviceId);
+                    
+                    // Check if navigator.mediaDevices is available
+                    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                        throw new Error('getUserMedia is not supported in this browser');
+                    }
+                    
+                    // Get input stream from selected microphone
+                    const constraints = {
+                        audio: {
+                            deviceId: deviceId ? { exact: deviceId } : undefined,
+                            sampleRate: 44100,
+                            channelCount: 1,
+                            echoCancellation: false,
+                            noiseSuppression: false,
+                            autoGainControl: false
+                        }
+                    };
+
+                    console.log('Requesting getUserMedia with constraints:', constraints);
+                    this.inputStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    console.log('Got input stream:', this.inputStream);
+                    
+                    // Create AudioContext only when we have a stream
+                    if (!this.audioContext) {
+                        this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                            sampleRate: 44100,
+                            latencyHint: 'interactive'
+                        });
+                        console.log('AudioContext created');
+                    }
+                    
+                    // Resume audio context if suspended
+                    if (this.audioContext.state === 'suspended') {
+                        await this.audioContext.resume();
+                        console.log('AudioContext resumed');
+                    }
+                    
+                    // Create source node from input stream
+                    this.sourceNode = this.audioContext.createMediaStreamSource(this.inputStream);
+                    console.log('Created media stream source');
+                    
+                    // Create processing chain (simplified to avoid crashes)
+                    const processedNode = this.createSimpleProcessingChain(this.sourceNode);
+                    
+                    // Create destination for virtual microphone
+                    this.destinationNode = this.audioContext.createMediaStreamDestination();
+                    processedNode.connect(this.destinationNode);
+                    console.log('Connected processing chain');
+                    
+                    this.outputStream = this.destinationNode.stream;
+                    
+                    // If virtual output device is selected, route audio to it
+                    if (outputDeviceId) {
+                        await this.setupVirtualOutput(outputDeviceId);
+                    }
+                    
+                    this.isActive = true;
+                    
+                    console.log('Virtual microphone started with device:', deviceId);
+                    console.log('Virtual microphone stream available:', this.outputStream);
+                    
+                    return true;
+                    
+                } catch (error) {
+                    console.error('Failed to start virtual microphone:', error);
+                    console.error('Error name:', error.name);
+                    console.error('Error message:', error.message);
+                    console.error('Error stack:', error.stack);
+                    
+                    // Clean up on error
+                    if (this.inputStream) {
+                        this.inputStream.getTracks().forEach(track => track.stop());
+                        this.inputStream = null;
+                    }
+                    
+                    return false;
+                }
+            }
+
+            async setupVirtualOutput(outputDeviceId) {
+                try {
+                    // Create an audio element to play to the virtual output device
+                    this.outputAudio = new Audio();
+                    this.outputAudio.srcObject = this.outputStream;
+                    this.outputAudio.muted = false;
+                    this.outputAudio.volume = 1.0;
+                    
+                    // Set the output device if supported
+                    if (this.outputAudio.setSinkId) {
+                        await this.outputAudio.setSinkId(outputDeviceId);
+                        console.log('Audio routed to virtual device:', outputDeviceId);
+                    } else {
+                        console.warn('setSinkId not supported - audio will play to default device');
+                    }
+                    
+                    // Start playing to route audio to the virtual device
+                    await this.outputAudio.play();
+                    
+                } catch (error) {
+                    console.error('Error setting up virtual output:', error);
+                    throw error;
+                }
+            }
+
+            createSimpleProcessingChain(sourceNode) {
+                try {
+                    // Create a simple gain node for now
+                    const gainNode = this.audioContext.createGain();
+                    gainNode.gain.value = 1.0; // Pass-through for now
+                    
+                    console.log('Created simple processing chain with gain node');
+                    
+                    // Connect source to gain
+                    sourceNode.connect(gainNode);
+                    
+                    return gainNode;
+                } catch (error) {
+                    console.error('Error creating processing chain:', error);
+                    // Return source node directly if processing fails
+                    return sourceNode;
+                }
+            }
+
+
+            async stop() {
+                if (!this.isActive) {
+                    return;
+                }
+
+                try {
+                    if (this.outputAudio) {
+                        this.outputAudio.pause();
+                        this.outputAudio.srcObject = null;
+                        this.outputAudio = null;
+                    }
+                    
+                    if (this.inputStream) {
+                        this.inputStream.getTracks().forEach(track => track.stop());
+                        this.inputStream = null;
+                    }
+                    
+                    if (this.sourceNode) {
+                        this.sourceNode.disconnect();
+                        this.sourceNode = null;
+                    }
+                    
+                    if (this.destinationNode) {
+                        this.destinationNode = null;
+                    }
+                    
+                    this.outputStream = null;
+                    this.isActive = false;
+                    
+                    console.log('Virtual microphone stopped');
+                    
+                } catch (error) {
+                    console.error('Error stopping virtual microphone:', error);
+                }
+            }
+
+            getVirtualStream() {
+                return this.outputStream;
+            }
+
+            isRunning() {
+                return this.isActive;
+            }
+
+            async destroy() {
+                await this.stop();
+                
+                if (this.audioContext) {
+                    await this.audioContext.close();
+                    this.audioContext = null;
+                }
+            }
+        }
+
+        // Virtual microphone control functions
+        async function toggleVirtualMic() {
+            const btn = document.getElementById('virtualMicBtn');
+            const statusText = document.getElementById('virtualMicStatusText');
+            const statusDot = document.getElementById('virtualMicDot');
+            
+            btn.disabled = true;
+            
+            try {
+                console.log('toggleVirtualMic called, current state:', virtualMicActive);
+                if (!virtualMicActive) {
+                    if (!selectedMicrophoneId) {
+                        alert('Please select a microphone first');
+                        btn.disabled = false;
+                        return;
+                    }
+                    
+                    statusText.textContent = 'Virtual Mic: Starting...';
+                    
+                    // Get selected virtual output device
+                    const outputSelect = document.getElementById('virtualOutputSelect');
+                    selectedVirtualOutputId = outputSelect.value || null;
+                    
+                    const success = await virtualMicrophone.start(selectedMicrophoneId, selectedVirtualOutputId);
+                    
+                    if (success) {
+                        virtualMicActive = true;
+                        btn.textContent = 'Stop Virtual Microphone';
+                        btn.classList.add('stop');
+                        statusText.textContent = 'Virtual Mic: Active';
+                        statusDot.classList.remove('inactive');
+                        statusDot.classList.add('active');
+                    } else {
+                        statusText.textContent = 'Virtual Mic: Failed to start';
+                        setTimeout(() => {
+                            statusText.textContent = 'Virtual Mic: Stopped';
+                        }, 2000);
+                    }
+                } else {
+                    statusText.textContent = 'Virtual Mic: Stopping...';
+                    await virtualMicrophone.stop();
+                    
+                    virtualMicActive = false;
+                    btn.textContent = 'Start Virtual Microphone';
+                    btn.classList.remove('stop');
+                    statusText.textContent = 'Virtual Mic: Stopped';
+                    statusDot.classList.remove('active');
+                    statusDot.classList.add('inactive');
+                }
+            } catch (error) {
+                console.error('Virtual microphone error:', error);
+                console.error('Error details:', {
+                    name: error.name,
+                    message: error.message,
+                    stack: error.stack
+                });
+                
+                statusText.textContent = `Virtual Mic: Error - ${error.message}`;
+                setTimeout(() => {
+                    statusText.textContent = 'Virtual Mic: Stopped';
+                }, 3000);
+                
+                // Reset state on error
+                virtualMicActive = false;
+                btn.textContent = 'Start Virtual Microphone';
+                btn.classList.remove('stop');
+                statusDot.classList.remove('active');
+                statusDot.classList.add('inactive');
+            }
+            
+            btn.disabled = false;
+        }
+
+        async function updateVirtualMicStatus() {
+            try {
+                const isActive = virtualMicrophone ? virtualMicrophone.isRunning() : false;
+                const statusText = document.getElementById('virtualMicStatusText');
+                const statusDot = document.getElementById('virtualMicDot');
+                const btn = document.getElementById('virtualMicBtn');
+                
+                if (isActive !== virtualMicActive) {
+                    virtualMicActive = isActive;
+                    
+                    if (isActive) {
+                        btn.textContent = 'Stop Virtual Microphone';
+                        btn.classList.add('stop');
+                        statusText.textContent = 'Virtual Mic: Active';
+                        statusDot.classList.remove('inactive');
+                        statusDot.classList.add('active');
+                    } else {
+                        btn.textContent = 'Start Virtual Microphone';
+                        btn.classList.remove('stop');
+                        statusText.textContent = 'Virtual Mic: Stopped';
+                        statusDot.classList.remove('active');
+                        statusDot.classList.add('inactive');
+                    }
+                }
+            } catch (error) {
+                console.error('Error checking virtual mic status:', error);
+            }
+        }
 
         function selectMicrophone(deviceId, element) {
             // Remove selected class from all items
@@ -261,9 +764,44 @@
             getMicrophones();
         }
 
+        // Global error handlers
+        window.addEventListener('error', (event) => {
+            console.error('Global error:', event.error);
+            console.error('Error details:', {
+                message: event.message,
+                filename: event.filename,
+                lineno: event.lineno,
+                colno: event.colno,
+                error: event.error
+            });
+        });
+
+        window.addEventListener('unhandledrejection', (event) => {
+            console.error('Unhandled promise rejection:', event.reason);
+            event.preventDefault(); // Prevent the app from crashing
+        });
+
         // Load microphones when the page loads
-        document.addEventListener('DOMContentLoaded', () => {
-            getMicrophones();
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                console.log('DOM loaded, initializing...');
+                
+                // Initialize virtual microphone
+                virtualMicrophone = new VirtualMicrophone();
+                const initSuccess = await virtualMicrophone.initialize();
+                console.log('Virtual microphone initialized:', initSuccess);
+                
+                getMicrophones();
+                await populateVirtualOutputDevices();
+                updateVirtualMicStatus();
+                
+                // Check virtual mic status periodically
+                setInterval(updateVirtualMicStatus, 1000);
+                
+                console.log('Initialization complete');
+            } catch (error) {
+                console.error('Error during initialization:', error);
+            }
         });
 
         // Refresh microphones when devices change
