@@ -1185,24 +1185,54 @@
                     throw new Error('ElevenLabs API key not available');
                 }
                 
-                console.log('Fetching ElevenLabs voices...');
+                console.log('Fetching ALL ElevenLabs voices...');
                 
-                const response = await fetch('https://api.elevenlabs.io/v2/voices', {
-                    headers: {
-                        'page_size': 100,
-                        'xi-api-key': apiKey,
-                        'Accept': 'application/json'
+                // Fetch all voices using pagination
+                let allVoices = [];
+                let nextPageToken = null;
+                let pageCount = 0;
+                
+                do {
+                    pageCount++;
+                    console.log(`Fetching page ${pageCount}...`);
+                    
+                    // Build URL with query parameters
+                    const url = new URL('https://api.elevenlabs.io/v2/voices');
+                    url.searchParams.set('page_size', '100');
+                    if (nextPageToken) {
+                        url.searchParams.set('next_page_token', nextPageToken);
                     }
-                });
+                    
+                    const response = await fetch(url.toString(), {
+                        headers: {
+                            'xi-api-key': apiKey,
+                            'Accept': 'application/json'
+                        }
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`Failed to fetch voices: ${response.status} ${response.statusText}`);
+                    }
+                    
+                    const data = await response.json();
+                    const pageVoices = data.voices || [];
+                    allVoices = allVoices.concat(pageVoices);
+                    
+                    console.log(`Page ${pageCount}: ${pageVoices.length} voices, total so far: ${allVoices.length}`);
+                    
+                    // Check if there are more pages
+                    nextPageToken = data.next_page_token;
+                    
+                    // Safety check to prevent infinite loops
+                    if (pageCount > 20) {
+                        console.warn('Reached maximum page limit (20), stopping pagination');
+                        break;
+                    }
+                    
+                } while (nextPageToken);
                 
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch voices: ${response.status} ${response.statusText}`);
-                }
-                
-                const data = await response.json();
-                availableVoices = data.voices || [];
-                
-                console.log('Loaded', availableVoices.length, 'voices from ElevenLabs');
+                availableVoices = allVoices;
+                console.log(`Loaded ${availableVoices.length} total voices from ElevenLabs across ${pageCount} pages`);
                 
                 populateVoiceSelect();
                 
