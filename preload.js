@@ -15,4 +15,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getSonioxApiKey: async () => {
         return await ipcRenderer.invoke('get-soniox-api-key');
     },
+    getElevenLabsApiKey: async () => {
+        return await ipcRenderer.invoke('get-elevenlabs-api-key');
+    },
+    generateTTS: async (text, voiceId = null) => {
+        return await ipcRenderer.invoke('generate-tts', text, voiceId);
+    },
 });

@@ -382,6 +382,29 @@
         </div>
     </div>
 
+    <div class="transcription-section">
+        <div class="transcription-header">
+            <h4>🎤 Voice Selection</h4>
+            <div class="transcription-status">
+                <div id="voiceFetchDot" class="status-dot inactive"></div>
+                <span id="voiceFetchStatusText">Loading voices...</span>
+            </div>
+        </div>
+        
+        <div class="voice-selection">
+            <label for="voiceSelect" style="display: block; font-size: 11px; color: #666; margin-bottom: 4px;">ElevenLabs Voice:</label>
+            <select id="voiceSelect" style="width: 100%; padding: 6px 8px; border: 1px solid rgba(0, 0, 0, 0.2); border-radius: 4px; font-size: 12px; background: white; margin-bottom: 8px;">
+                <option value="">Loading voices...</option>
+            </select>
+            
+            <div id="voiceDetails" style="display: none; background: rgba(0, 122, 255, 0.05); border: 1px solid rgba(0, 122, 255, 0.2); border-radius: 4px; padding: 8px; font-size: 11px; margin-top: 8px;">
+                <div style="margin-bottom: 4px;"><strong>Voice ID:</strong> <span id="selectedVoiceId">-</span></div>
+                <div style="margin-bottom: 4px;"><strong>Language:</strong> <span id="selectedVoiceLanguage">-</span></div>
+                <div><strong>Description:</strong> <span id="selectedVoiceDescription">-</span></div>
+            </div>
+        </div>
+    </div>
+
     <script>
         // Override console to route all output to main process CLI IMMEDIATELY
         const originalConsole = {
@@ -429,6 +452,8 @@
         let virtualMicrophone = null;
         let virtualOutputDevices = [];
         let selectedVirtualOutputId = null;
+        let availableVoices = [];
+        let selectedVoiceId = 'JBFqnCBsd6RMkjVDRZzb'; // Default voice
 
         // Function to detect virtual audio output devices
         async function getVirtualOutputDevices() {
@@ -631,9 +656,18 @@
                 this.interimTranscript = newInterimText;
                 this.updateTranscriptionDisplay();
 
+                // Auto-generate TTS for final text
+                if (hasNewFinalText && newFinalText.trim()) {
+                    console.log('New final text received, queuing for TTS:', newFinalText.trim());
+                    queueTTSForText(this.finalTranscript);
+                }
 
                 if (response.finished) {
                     console.log('Transcription finished');
+                    // Generate TTS for any remaining text
+                    if (this.finalTranscript.trim()) {
+                        queueTTSForText(this.finalTranscript);
+                    }
                 }
             }
 
@@ -791,6 +825,11 @@
                     }
                     
                     this.isActive = true;
+                    
+                    // Reset TTS state when starting virtual microphone
+                    ttsQueue.length = 0;
+                    isProcessingTTS = false;
+                    lastProcessedText = '';
                     
                     // Start transcription if API key is available
                     await this.startTranscription();
@@ -1008,6 +1047,10 @@
                     // Stop beep scheduling
                     this.stopBeepScheduling();
                     
+                    // Clear TTS queue when stopping
+                    ttsQueue.length = 0;
+                    isProcessingTTS = false;
+                    
                     if (this.outputAudio) {
                         this.outputAudio.pause();
                         this.outputAudio.srcObject = null;
@@ -1116,6 +1159,314 @@
                         apiKeySection.style.display = 'none';
                     }
                 }
+            }
+        }
+
+        // Voice Selection Functions
+        async function fetchElevenLabsVoices() {
+            const statusText = document.getElementById('voiceFetchStatusText');
+            const statusDot = document.getElementById('voiceFetchDot');
+            const voiceSelect = document.getElementById('voiceSelect');
+            
+            try {
+                statusText.textContent = 'Loading voices...';
+                statusDot.classList.remove('active');
+                statusDot.classList.add('inactive');
+                
+                // Get API key from main process
+                let apiKey = null;
+                if (window.electronAPI) {
+                    apiKey = await window.electronAPI.getElevenLabsApiKey();
+                }
+                
+                if (!apiKey) {
+                    throw new Error('ElevenLabs API key not available');
+                }
+                
+                console.log('Fetching ElevenLabs voices...');
+                
+                const response = await fetch('https://api.elevenlabs.io/v2/voices', {
+                    headers: {
+                        'page_size': 100,
+                        'xi-api-key': apiKey,
+                        'Accept': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch voices: ${response.status} ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                availableVoices = data.voices || [];
+                
+                console.log('Loaded', availableVoices.length, 'voices from ElevenLabs');
+                
+                populateVoiceSelect();
+                
+                statusText.textContent = `${availableVoices.length} voices loaded`;
+                statusDot.classList.remove('inactive');
+                statusDot.classList.add('active');
+                
+            } catch (error) {
+                console.error('Error fetching ElevenLabs voices:', error);
+                statusText.textContent = 'Failed to load voices';
+                statusDot.classList.remove('active');
+                statusDot.classList.add('inactive');
+                
+                // Fallback to default voice
+                voiceSelect.innerHTML = '<option value="JBFqnCBsd6RMkjVDRZzb">Default Voice (JBFqnCBsd6RMkjVDRZzb)</option>';
+            }
+        }
+        
+        function populateVoiceSelect() {
+            const voiceSelect = document.getElementById('voiceSelect');
+            voiceSelect.innerHTML = '';
+            
+            // Add default option
+            const defaultOption = document.createElement('option');
+            defaultOption.value = '';
+            defaultOption.textContent = 'Select a voice...';
+            voiceSelect.appendChild(defaultOption);
+            
+            // Add voices grouped by language if possible
+            const voicesByLanguage = {};
+            
+            availableVoices.forEach(voice => {
+                const language = voice.language || 'Unknown';
+                if (!voicesByLanguage[language]) {
+                    voicesByLanguage[language] = [];
+                }
+                voicesByLanguage[language].push(voice);
+            });
+            
+            // Sort languages
+            const sortedLanguages = Object.keys(voicesByLanguage).sort();
+            
+            sortedLanguages.forEach(language => {
+                // Add language group header
+                const langGroup = document.createElement('optgroup');
+                langGroup.label = language;
+                
+                // Sort voices within language
+                voicesByLanguage[language]
+                    .sort((a, b) => a.name.localeCompare(b.name))
+                    .forEach(voice => {
+                        const option = document.createElement('option');
+                        option.value = voice.voice_id;
+                        option.textContent = `${voice.name} (${voice.voice_id.substring(0, 8)}...)`;
+                        option.dataset.voice = JSON.stringify(voice);
+                        langGroup.appendChild(option);
+                    });
+                
+                voiceSelect.appendChild(langGroup);
+            });
+            
+            // Set default selection
+            const savedVoiceId = localStorage.getItem('selectedVoiceId') || selectedVoiceId;
+            if (savedVoiceId) {
+                voiceSelect.value = savedVoiceId;
+                updateVoiceDetails(savedVoiceId);
+            }
+            
+            // Add change listener
+            voiceSelect.addEventListener('change', onVoiceSelectionChange);
+        }
+        
+        function onVoiceSelectionChange() {
+            const voiceSelect = document.getElementById('voiceSelect');
+            const voiceId = voiceSelect.value;
+            
+            if (voiceId) {
+                selectedVoiceId = voiceId;
+                localStorage.setItem('selectedVoiceId', voiceId);
+                updateVoiceDetails(voiceId);
+                console.log('Voice selected:', voiceId);
+            } else {
+                hideVoiceDetails();
+            }
+        }
+        
+        function updateVoiceDetails(voiceId) {
+            const voice = availableVoices.find(v => v.voice_id === voiceId);
+            const voiceDetails = document.getElementById('voiceDetails');
+            const voiceIdEl = document.getElementById('selectedVoiceId');
+            const voiceLanguageEl = document.getElementById('selectedVoiceLanguage');
+            const voiceDescriptionEl = document.getElementById('selectedVoiceDescription');
+            
+            if (voice) {
+                voiceIdEl.textContent = voice.voice_id;
+                voiceLanguageEl.textContent = voice.language || 'Unknown';
+                voiceDescriptionEl.textContent = voice.description || voice.name || 'No description available';
+                voiceDetails.style.display = 'block';
+            } else {
+                hideVoiceDetails();
+            }
+        }
+        
+        function hideVoiceDetails() {
+            const voiceDetails = document.getElementById('voiceDetails');
+            voiceDetails.style.display = 'none';
+        }
+
+        // Real-time TTS functionality
+        let ttsQueue = [];
+        let isProcessingTTS = false;
+        let lastProcessedText = '';
+        
+        async function generateTTSForText(text) {
+            if (!window.electronAPI) {
+                console.warn('TTS functionality is only available in the Electron app');
+                return false;
+            }
+            
+            if (!virtualMicrophone || !virtualMicrophone.isRunning()) {
+                console.warn('Virtual microphone is not active, skipping TTS');
+                return false;
+            }
+            
+            try {
+                console.log('Generating real-time TTS for:', text.substring(0, 50) + '...');
+                console.log('Using voice:', selectedVoiceId);
+                const result = await window.electronAPI.generateTTS(text, selectedVoiceId);
+                
+                if (result.success && result.audioFilePath) {
+                    const playSuccess = await playAudioToVirtualMic(result.audioFilePath);
+                    if (playSuccess) {
+                        console.log('Real-time TTS completed successfully');
+                        return true;
+                    }
+                }
+                return false;
+            } catch (error) {
+                console.error('Real-time TTS Error:', error);
+                return false;
+            }
+        }
+        
+        async function processNextTTS() {
+            if (isProcessingTTS || ttsQueue.length === 0) return;
+            
+            isProcessingTTS = true;
+            const text = ttsQueue.shift();
+            
+            try {
+                await generateTTSForText(text);
+            } catch (error) {
+                console.error('Error processing TTS queue:', error);
+            } finally {
+                isProcessingTTS = false;
+                // Process next item in queue
+                if (ttsQueue.length > 0) {
+                    setTimeout(() => processNextTTS(), 100);
+                }
+            }
+        }
+        
+        function queueTTSForText(fullText) {
+            if (!fullText || fullText.trim().length < 5) return;
+            
+            const cleanText = fullText.trim();
+            
+            // Extract new text that hasn't been processed yet
+            const newText = cleanText.substring(lastProcessedText.length).trim();
+            if (!newText) return;
+            
+            // Split into sentences and process each complete sentence
+            const sentences = newText.split(/([.!?]+\s*)/);
+            let processedSentences = '';
+            
+            for (let i = 0; i < sentences.length - 1; i += 2) {
+                const sentence = sentences[i];
+                const punctuation = sentences[i + 1] || '';
+                const fullSentence = (sentence + punctuation).trim();
+                
+                if (fullSentence.length > 5) {
+                    processedSentences += fullSentence + ' ';
+                    
+                    // Queue individual sentence for TTS
+                    ttsQueue.push(fullSentence);
+                    console.log('Queued sentence for TTS:', fullSentence);
+                }
+            }
+            
+            if (processedSentences) {
+                lastProcessedText = (lastProcessedText + ' ' + processedSentences).trim();
+                
+                // Clear queue if it gets too long (keep only latest 2 items)
+                if (ttsQueue.length > 2) {
+                    ttsQueue = ttsQueue.slice(-2);
+                }
+                
+                processNextTTS();
+            }
+        }
+        
+        async function playAudioToVirtualMic(audioFilePath) {
+            try {
+                if (!virtualMicrophone || !virtualMicrophone.isRunning()) {
+                    console.warn('Virtual microphone is not active');
+                    return false;
+                }
+                
+                console.log('Loading audio file for virtual mic playback:', audioFilePath);
+                
+                // Create audio element to load the generated file
+                const audio = new Audio();
+                audio.crossOrigin = 'anonymous';
+                
+                return new Promise((resolve) => {
+                    audio.onload = audio.oncanplaythrough = async () => {
+                        try {
+                            console.log('Audio loaded, playing through virtual mic...');
+                            
+                            if (!virtualMicrophone.audioContext) {
+                                console.error('Virtual microphone audio context not available');
+                                resolve(false);
+                                return;
+                            }
+                            
+                            // Create media element source
+                            const audioSource = virtualMicrophone.audioContext.createMediaElementSource(audio);
+                            
+                            // Connect to virtual microphone destination
+                            if (virtualMicrophone.destinationNode) {
+                                audioSource.connect(virtualMicrophone.destinationNode);
+                                console.log('Audio connected to virtual microphone destination');
+                            }
+                            
+                            // Play the audio
+                            await audio.play();
+                            console.log('Audio playback started');
+                            
+                            audio.onended = () => {
+                                console.log('Audio playback completed');
+                                try {
+                                    audioSource.disconnect();
+                                } catch (e) {
+                                    // Ignore disconnect errors
+                                }
+                                resolve(true);
+                            };
+                            
+                        } catch (error) {
+                            console.error('Error playing audio:', error);
+                            resolve(false);
+                        }
+                    };
+                    
+                    audio.onerror = (error) => {
+                        console.error('Error loading audio file:', error);
+                        resolve(false);
+                    };
+                    
+                    // Set the source to the file path
+                    audio.src = `file://${audioFilePath}`;
+                });
+                
+            } catch (error) {
+                console.error('Error in playAudioToVirtualMic:', error);
+                return false;
             }
         }
 
@@ -1369,6 +1720,9 @@
                 // Initialize transcription UI
                 await loadSavedApiKey();
                 updateTranscriptionStatus('Stopped', false);
+                
+                // Load ElevenLabs voices
+                await fetchElevenLabsVoices();
                 
                 // Check virtual mic status periodically
                 setInterval(updateVirtualMicStatus, 1000);

@@ -1,8 +1,10 @@
 const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain } = require('electron');
 const path = require('path');
 require('dotenv').config();
+const TTSService = require('./tts-service');
 let tray = null;
 let window = null;
+let ttsService = null;
 
 // Set up IPC handlers for console output
 ipcMain.handle('console-log', (event, message) => {
@@ -20,6 +22,24 @@ ipcMain.handle('console-warn', (event, message) => {
 // Handle API key requests from renderer
 ipcMain.handle('get-soniox-api-key', () => {
   return process.env.SONIOX_API_KEY || null;
+});
+
+ipcMain.handle('get-elevenlabs-api-key', () => {
+  return process.env.ELEVENLABS_API_KEY || null;
+});
+
+// Handle TTS requests from renderer
+ipcMain.handle('generate-tts', async (event, text, voiceId = null) => {
+  try {
+    if (!ttsService) {
+      ttsService = new TTSService();
+    }
+    const audioFilePath = await ttsService.generateAndPlayAudio(text, voiceId);
+    return { success: true, audioFilePath };
+  } catch (error) {
+    console.error('TTS Error:', error);
+    return { success: false, error: error.message };
+  }
 });
 
 

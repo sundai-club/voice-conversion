@@ -16,8 +16,12 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@elevenlabs/elevenlabs-js": "^2.6.0",
+    "@types/uuid": "^10.0.0",
     "dotenv": "^17.2.0",
-    "node-wav": "^0.0.2"
+    "node-fetch": "^3.3.2",
+    "node-wav": "^0.0.2",
+    "uuid": "^11.1.0"
   },
   "devDependencies": {
     "electron": "^28.0.0"
