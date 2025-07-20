@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Microphone List</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 16px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-size: 14px;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 8px;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+        }
+
+        .title {
+            font-weight: 600;
+            color: #333;
+            margin: 0;
+            flex: 1;
+        }
+
+        .refresh-btn {
+            background: #007AFF;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .refresh-btn:hover {
+            background: #0056b3;
+        }
+
+        .mic-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .mic-item {
+            display: flex;
+            align-items: center;
+            padding: 8px 12px;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+            cursor: pointer;
+            border-radius: 6px;
+            margin: 2px 0;
+            transition: all 0.2s ease;
+            position: relative;
+        }
+
+        .mic-item:last-child {
+            border-bottom: none;
+        }
+
+        .mic-item:hover {
+            background: rgba(0, 122, 255, 0.1);
+            transform: translateX(2px);
+        }
+
+        .mic-item.selected {
+            background: rgba(0, 122, 255, 0.15);
+            border: 1px solid rgba(0, 122, 255, 0.3);
+        }
+
+        .mic-item.selected::after {
+            content: "✓";
+            position: absolute;
+            right: 12px;
+            color: #007AFF;
+            font-weight: bold;
+            font-size: 16px;
+        }
+
+        .mic-icon {
+            width: 16px;
+            height: 16px;
+            margin-right: 8px;
+            opacity: 0.7;
+        }
+
+        .mic-info {
+            flex: 1;
+        }
+
+        .mic-name {
+            font-weight: 500;
+            color: #333;
+            margin: 0 0 2px 0;
+            font-size: 13px;
+        }
+
+        .mic-id {
+            font-size: 11px;
+            color: #666;
+            font-family: 'SF Mono', Monaco, monospace;
+            margin: 0;
+        }
+
+        .status {
+            padding: 8px 0;
+            text-align: center;
+            color: #666;
+            font-size: 12px;
+        }
+
+        .error {
+            color: #ff3333;
+        }
+
+        .loading {
+            color: #007AFF;
+        }
+
+        .empty {
+            color: #999;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h3 class="title">🎤 Available Microphones</h3>
+        <button class="refresh-btn" onclick="refreshMicrophones()">↻</button>
+    </div>
+    
+    <div id="status" class="status loading">Loading microphones...</div>
+    <ul id="micList" class="mic-list"></ul>
+
+    <script>
+        let microphones = [];
+        let selectedMicrophoneId = null;
+
+        function selectMicrophone(deviceId, element) {
+            // Remove selected class from all items
+            document.querySelectorAll('.mic-item').forEach(item => {
+                item.classList.remove('selected');
+            });
+            
+            // Add selected class to clicked item
+            element.classList.add('selected');
+            
+            // Store selected microphone
+            selectedMicrophoneId = deviceId;
+            localStorage.setItem('selectedMicrophone', deviceId);
+            
+            console.log('Selected microphone:', deviceId);
+        }
+
+        async function getMicrophones() {
+            try {
+                const statusEl = document.getElementById('status');
+                const listEl = document.getElementById('micList');
+                
+                statusEl.textContent = 'Loading microphones...';
+                statusEl.className = 'status loading';
+                listEl.innerHTML = '';
+
+                // Request microphone permissions first
+                await navigator.mediaDevices.getUserMedia({ audio: true });
+                
+                // Get all audio input devices
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const audioInputs = devices.filter(device => device.kind === 'audioinput');
+                
+                microphones = audioInputs;
+                
+                if (audioInputs.length === 0) {
+                    statusEl.textContent = 'No microphones found';
+                    statusEl.className = 'status empty';
+                    return;
+                }
+
+                statusEl.style.display = 'none';
+                
+                // Load previously selected microphone
+                const savedSelection = localStorage.getItem('selectedMicrophone');
+                let hasSelection = false;
+                let defaultMicrophone = null;
+                
+                // Find the default microphone (device with deviceId === 'default' or empty deviceId)
+                const defaultDevice = audioInputs.find(device => 
+                    device.deviceId === 'default' || device.deviceId === '' || 
+                    device.label.toLowerCase().includes('default')
+                );
+                
+                if (defaultDevice) {
+                    defaultMicrophone = defaultDevice;
+                } else {
+                    // If no explicit default found, use the first microphone
+                    defaultMicrophone = audioInputs[0];
+                }
+                
+                // Display microphones
+                audioInputs.forEach((device, index) => {
+                    const li = document.createElement('li');
+                    li.className = 'mic-item';
+                    
+                    const deviceName = device.label || `Microphone ${index + 1}`;
+                    const deviceId = device.deviceId;
+                    
+                    // Check if this was the previously selected microphone
+                    if (savedSelection === deviceId) {
+                        li.classList.add('selected');
+                        selectedMicrophoneId = deviceId;
+                        hasSelection = true;
+                    }
+                    // Select default microphone if no previous selection
+                    else if (!savedSelection && device === defaultMicrophone) {
+                        li.classList.add('selected');
+                        selectedMicrophoneId = deviceId;
+                        localStorage.setItem('selectedMicrophone', deviceId);
+                        hasSelection = true;
+                    }
+                    
+                    li.innerHTML = `
+                        <svg class="mic-icon" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                            <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+                        </svg>
+                        <div class="mic-info">
+                            <p class="mic-name">${deviceName}</p>
+                            <p class="mic-id">${deviceId.substring(0, 20)}...</p>
+                        </div>
+                    `;
+                    
+                    // Add click handler
+                    li.addEventListener('click', () => {
+                        selectMicrophone(deviceId, li);
+                    });
+                    
+                    listEl.appendChild(li);
+                });
+
+            } catch (error) {
+                console.error('Error getting microphones:', error);
+                const statusEl = document.getElementById('status');
+                statusEl.textContent = `Error: ${error.message}`;
+                statusEl.className = 'status error';
+            }
+        }
+
+        function refreshMicrophones() {
+            getMicrophones();
+        }
+
+        // Load microphones when the page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            getMicrophones();
+        });
+
+        // Refresh microphones when devices change
+        navigator.mediaDevices.addEventListener('devicechange', () => {
+            getMicrophones();
+        });
+    </script>
+</body>
+</html>

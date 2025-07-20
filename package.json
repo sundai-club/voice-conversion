@@ -1,0 +1,16 @@
+{
+  "name": "mic-list-menubar",
+  "version": "1.0.0",
+  "description": "Simple Electron app that shows available microphones in menu bar",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "keywords": ["electron", "menubar", "microphone", "audio"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^28.0.0"
+  }
+}
