@@ -356,6 +356,13 @@
         <div class="setup-info">
             ℹ️ Need a virtual audio device? <a href="#" onclick="showSetupInfo()">Setup Guide</a>
         </div>
+        
+        <div style="margin-top: 8px; padding: 8px; background: rgba(0, 0, 0, 0.02); border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 4px;">
+            <label style="display: flex; align-items: center; font-size: 12px; cursor: pointer;">
+                <input type="checkbox" id="debugBeepsCheckbox" checked style="margin-right: 6px;">
+                <span>Enable debug beeps (audio feedback when virtual mic is active)</span>
+            </label>
+        </div>
     </div>
 
     <div class="transcription-section">
@@ -456,6 +463,7 @@
         let selectedVirtualOutputId = null;
         let availableVoices = [];
         let selectedVoiceId = 'JBFqnCBsd6RMkjVDRZzb'; // Default voice
+        let debugBeepsEnabled = true; // Default to enabled
 
         // Function to detect virtual audio output devices
         async function getVirtualOutputDevices() {
@@ -973,7 +981,7 @@
                     this.stopBeepScheduling(); // Clear any existing schedule
                     
                     const createBeep = () => {
-                        if (!this.isActive || !this.beepGainNode) return;
+                        if (!this.isActive || !this.beepGainNode || !debugBeepsEnabled) return;
                         
                         try {
                             // Create a new oscillator for each beep (oscillators are one-time use)
@@ -1584,6 +1592,34 @@
             }
         }
 
+        // Debug beeps control functions
+        function initializeDebugBeeps() {
+            const checkbox = document.getElementById('debugBeepsCheckbox');
+            
+            // Load saved preference
+            const saved = localStorage.getItem('debugBeepsEnabled');
+            if (saved !== null) {
+                debugBeepsEnabled = saved === 'true';
+                checkbox.checked = debugBeepsEnabled;
+            }
+            
+            // Add change listener
+            checkbox.addEventListener('change', function() {
+                debugBeepsEnabled = this.checked;
+                localStorage.setItem('debugBeepsEnabled', debugBeepsEnabled);
+                console.log('Debug beeps', debugBeepsEnabled ? 'enabled' : 'disabled');
+                
+                // If turning off beeps while virtual mic is active, stop current beeps
+                if (!debugBeepsEnabled && virtualMicrophone && virtualMicrophone.isRunning()) {
+                    virtualMicrophone.stopBeepScheduling();
+                }
+                // If turning on beeps while virtual mic is active, start beeps
+                else if (debugBeepsEnabled && virtualMicrophone && virtualMicrophone.isRunning()) {
+                    virtualMicrophone.startBeepScheduling();
+                }
+            });
+        }
+
 
         // Virtual microphone control functions
         async function toggleVirtualMic() {
@@ -1837,6 +1873,9 @@
                 
                 // Load ElevenLabs voices
                 await fetchElevenLabsVoices();
+                
+                // Initialize debug beeps control
+                initializeDebugBeeps();
                 
                 // Check virtual mic status periodically
                 setInterval(updateVirtualMicStatus, 1000);
