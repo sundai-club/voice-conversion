@@ -11,5 +11,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     logWarn: async (message) => {
         await ipcRenderer.invoke('console-warn', message);
+    },
+    getSonioxApiKey: async () => {
+        return await ipcRenderer.invoke('get-soniox-api-key');
     }
 });

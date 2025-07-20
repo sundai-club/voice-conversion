@@ -1,5 +1,6 @@
 const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain } = require('electron');
 const path = require('path');
+require('dotenv').config();
 
 let tray = null;
 let window = null;
@@ -15,6 +16,11 @@ ipcMain.handle('console-error', (event, message) => {
 
 ipcMain.handle('console-warn', (event, message) => {
   console.warn(message);
+});
+
+// Handle API key requests from renderer
+ipcMain.handle('get-soniox-api-key', () => {
+  return process.env.SONIOX_API_KEY || null;
 });
 
 function createWindow() {
@@ -45,10 +51,6 @@ function createWindow() {
         window.hide();
       }
     }, 100);
-  });
-
-  window.webContents.on('crashed', (event, killed) => {
-    console.error('Renderer process crashed:', { killed });
   });
 
   window.on('unresponsive', () => {

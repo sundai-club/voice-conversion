@@ -7,10 +7,16 @@
     "start": "electron .",
     "dev": "electron . --dev"
   },
-  "keywords": ["electron", "menubar", "microphone", "audio"],
+  "keywords": [
+    "electron",
+    "menubar",
+    "microphone",
+    "audio"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "dotenv": "^17.2.0",
     "node-wav": "^0.0.2"
   },
   "devDependencies": {

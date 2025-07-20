@@ -237,6 +237,91 @@
         .virtual-mic-btn.stop:hover {
             background: #d32f2f;
         }
+
+        .transcription-section {
+            margin-top: 16px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(0, 0, 0, 0.1);
+        }
+
+        .transcription-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .transcription-header h4 {
+            margin: 0;
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .transcription-status {
+            display: flex;
+            align-items: center;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .api-key-input {
+            margin-bottom: 12px;
+        }
+
+        .api-key-input label {
+            display: block;
+            font-size: 11px;
+            color: #666;
+            margin-bottom: 4px;
+        }
+
+        .api-key-input input {
+            width: calc(100% - 60px);
+            padding: 6px 8px;
+            border: 1px solid rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+            font-size: 12px;
+            margin-right: 8px;
+        }
+
+        .api-key-input button {
+            width: 50px;
+            padding: 6px 8px;
+            background: #007AFF;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+
+        .api-key-input button:hover {
+            background: #0056b3;
+        }
+
+        .transcription-output {
+            background: rgba(0, 0, 0, 0.02);
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            border-radius: 6px;
+            padding: 12px;
+            min-height: 80px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .transcription-text {
+            font-size: 12px;
+            line-height: 1.4;
+            color: #333;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .transcription-text.empty {
+            color: #999;
+            font-style: italic;
+        }
     </style>
 </head>
 <body>
@@ -269,6 +354,28 @@
         
         <div class="setup-info">
             ℹ️ Need a virtual audio device? <a href="#" onclick="showSetupInfo()">Setup Guide</a>
+        </div>
+    </div>
+
+    <div class="transcription-section">
+        <div class="transcription-header">
+            <h4>🎯 Live Transcription</h4>
+            <div class="transcription-status">
+                <div id="transcriptionDot" class="status-dot inactive"></div>
+                <span id="transcriptionStatusText">Stopped</span>
+            </div>
+        </div>
+        
+        <div class="api-key-input">
+            <label for="sonioxApiKey">Soniox API Key:</label>
+            <input type="password" id="sonioxApiKey" placeholder="Enter your Soniox API key..." />
+            <button id="saveApiKey" onclick="saveApiKey()">Save</button>
+        </div>
+        
+        <div class="transcription-output">
+            <div id="transcriptionText" class="transcription-text">
+                Transcription will appear here when virtual microphone is active...
+            </div>
         </div>
     </div>
 
@@ -401,6 +508,11 @@
                 this.destinationNode = null;
                 this.outputStream = null;
                 this.outputAudio = null;
+                this.transcriptionWs = null;
+                this.transcriptionActive = false;
+                this.finalTranscript = '';
+                this.interimTranscript = '';
+                this.mediaRecorder = null;
             }
 
             async initialize() {
@@ -413,8 +525,194 @@
                 }
             }
 
+            async startTranscription() {
+                let apiKey = null;
+                
+                // Try to get API key from environment first
+                if (window.electronAPI) {
+                    apiKey = await window.electronAPI.getSonioxApiKey();
+                }
+                
+                // Fallback to localStorage if not in environment
+                if (!apiKey) {
+                    apiKey = localStorage.getItem('sonioxApiKey');
+                }
+                
+                if (!apiKey) {
+                    console.warn('Soniox API key not set. Skipping transcription.');
+                    updateTranscriptionStatus('API Key Required', false);
+                    return;
+                }
 
+                if (this.transcriptionActive) {
+                    console.log('Transcription already active');
+                    return;
+                }
 
+                try {
+                    console.log('Starting Soniox transcription...');
+                    updateTranscriptionStatus('Connecting...', false);
+
+                    this.transcriptionWs = new WebSocket('wss://stt-rt.soniox.com/transcribe-websocket');
+                    
+                    this.transcriptionWs.onopen = () => {
+                        console.log('Soniox WebSocket connected');
+                        updateTranscriptionStatus('Active', true);
+                        
+                        // Send start request
+                        this.transcriptionWs.send(JSON.stringify({
+                            api_key: apiKey,
+                            audio_format: "auto", // Let Soniox auto-detect the format
+                            model: "stt-rt-preview",
+                            language_hints: ["en"]
+                        }));
+                        
+                        this.transcriptionActive = true;
+                        this.finalTranscript = '';
+                        this.interimTranscript = '';
+                        
+                        // Start capturing audio for transcription
+                        this.startAudioCapture();
+                    };
+
+                    this.transcriptionWs.onmessage = (event) => {
+                        try {
+                            const response = JSON.parse(event.data);
+                            this.handleTranscriptionResponse(response);
+                        } catch (error) {
+                            console.error('Error parsing transcription response:', error);
+                        }
+                    };
+
+                    this.transcriptionWs.onerror = (error) => {
+                        console.error('Transcription WebSocket error:', error);
+                        updateTranscriptionStatus('Error', false);
+                    };
+
+                    this.transcriptionWs.onclose = () => {
+                        console.log('Transcription WebSocket closed');
+                        this.transcriptionActive = false;
+                        updateTranscriptionStatus('Stopped', false);
+                    };
+
+                } catch (error) {
+                    console.error('Error starting transcription:', error);
+                    updateTranscriptionStatus('Error', false);
+                }
+            }
+
+            handleTranscriptionResponse(response) {
+                if (response.error_code) {
+                    console.error(`Transcription error: ${response.error_code} ${response.error_message}`);
+                    updateTranscriptionStatus('Error', false);
+                    return;
+                }
+
+                let newInterimText = '';
+                let hasNewFinalText = false;
+
+                for (const token of response.tokens || []) {
+                    if (token.text) {
+                        if (token.is_final) {
+                            this.finalTranscript += token.text;
+                            hasNewFinalText = true;
+                        } else {
+                            newInterimText += token.text;
+                        }
+                    }
+                }
+
+                this.interimTranscript = newInterimText;
+                this.updateTranscriptionDisplay();
+
+                if (response.finished) {
+                    console.log('Transcription finished');
+                }
+            }
+
+            updateTranscriptionDisplay() {
+                const transcriptionEl = document.getElementById('transcriptionText');
+                if (transcriptionEl) {
+                    const fullText = this.finalTranscript + this.interimTranscript;
+                    transcriptionEl.textContent = fullText || 'Listening...';
+                    transcriptionEl.classList.toggle('empty', !fullText);
+                    
+                    // Auto-scroll to bottom
+                    transcriptionEl.scrollTop = transcriptionEl.scrollHeight;
+                }
+            }
+
+            async startAudioCapture() {
+                if (!this.audioContext || !this.sourceNode) {
+                    console.warn('Audio context not available for transcription');
+                    return;
+                }
+
+                try {
+                    // Use a more stable approach with MediaRecorder for audio capture
+                    if (this.inputStream) {
+                        console.log('Setting up MediaRecorder for transcription...');
+                        
+                        // Create a MediaRecorder to capture audio
+                        this.mediaRecorder = new MediaRecorder(this.inputStream, {
+                            mimeType: 'audio/webm;codecs=opus',
+                            audioBitsPerSecond: 16000
+                        });
+                        
+                        this.mediaRecorder.ondataavailable = (event) => {
+                            if (event.data.size > 0 && this.transcriptionActive && 
+                                this.transcriptionWs && this.transcriptionWs.readyState === WebSocket.OPEN) {
+                                
+                                // Convert the blob to ArrayBuffer and send
+                                const reader = new FileReader();
+                                reader.onload = () => {
+                                    if (this.transcriptionWs && this.transcriptionWs.readyState === WebSocket.OPEN) {
+                                        this.transcriptionWs.send(reader.result);
+                                    }
+                                };
+                                reader.readAsArrayBuffer(event.data);
+                            }
+                        };
+                        
+                        this.mediaRecorder.onerror = (error) => {
+                            console.error('MediaRecorder error:', error);
+                        };
+                        
+                        // Start recording with small intervals for real-time streaming
+                        this.mediaRecorder.start(100); // 100ms chunks
+                        console.log('Audio capture started for transcription');
+                    }
+
+                } catch (error) {
+                    console.error('Error starting audio capture:', error);
+                    // Fallback to a simple approach without real-time streaming
+                    console.log('Falling back to basic transcription mode');
+                }
+            }
+
+            stopTranscription() {
+                if (this.transcriptionWs) {
+                    if (this.transcriptionWs.readyState === WebSocket.OPEN) {
+                        this.transcriptionWs.send(''); // Signal end of stream
+                    }
+                    this.transcriptionWs.close();
+                    this.transcriptionWs = null;
+                }
+
+                if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+                    this.mediaRecorder.stop();
+                    this.mediaRecorder = null;
+                }
+
+                if (this.audioProcessor) {
+                    this.audioProcessor.disconnect();
+                    this.audioProcessor = null;
+                }
+
+                this.transcriptionActive = false;
+                updateTranscriptionStatus('Stopped', false);
+                console.log('Transcription stopped');
+            }
 
             async start(deviceId, outputDeviceId = null) {
                 if (this.isActive) {
@@ -481,6 +779,9 @@
                     }
                     
                     this.isActive = true;
+                    
+                    // Start transcription if API key is available
+                    await this.startTranscription();
                     
                     console.log('Virtual microphone started with device:', deviceId);
                     console.log('Virtual microphone stream available:', this.outputStream);
@@ -692,6 +993,9 @@
                     // Set isActive to false first to stop beep scheduling
                     this.isActive = false;
                     
+                    // Stop transcription
+                    this.stopTranscription();
+                    
                     // Stop beep scheduling
                     this.stopBeepScheduling();
                     
@@ -736,6 +1040,72 @@
 
             isRunning() {
                 return this.isActive;
+            }
+        }
+
+        // Helper functions for transcription UI
+        function updateTranscriptionStatus(status, isActive) {
+            const statusText = document.getElementById('transcriptionStatusText');
+            const statusDot = document.getElementById('transcriptionDot');
+            
+            if (statusText) statusText.textContent = status;
+            if (statusDot) {
+                statusDot.classList.toggle('active', isActive);
+                statusDot.classList.toggle('inactive', !isActive);
+            }
+        }
+
+        function saveApiKey() {
+            const apiKeyInput = document.getElementById('sonioxApiKey');
+            const apiKey = apiKeyInput.value.trim();
+            
+            if (apiKey) {
+                localStorage.setItem('sonioxApiKey', apiKey);
+                console.log('Soniox API key saved');
+                
+                // Clear the input for security
+                apiKeyInput.value = '';
+                alert('API key saved successfully!');
+            } else {
+                alert('Please enter a valid API key');
+            }
+        }
+
+        async function loadSavedApiKey() {
+            let hasApiKey = false;
+            
+            // Check environment variable first
+            if (window.electronAPI) {
+                const envApiKey = await window.electronAPI.getSonioxApiKey();
+                if (envApiKey) {
+                    hasApiKey = true;
+                    console.log('Using Soniox API key from environment');
+                }
+            }
+            
+            // Check localStorage as fallback
+            if (!hasApiKey) {
+                const savedApiKey = localStorage.getItem('sonioxApiKey');
+                if (savedApiKey) {
+                    hasApiKey = true;
+                    console.log('Using Soniox API key from localStorage');
+                }
+            }
+            
+            if (hasApiKey) {
+                // Don't populate the input field for security, just indicate it's saved
+                const statusText = document.getElementById('transcriptionStatusText');
+                if (statusText && statusText.textContent === 'Stopped') {
+                    statusText.textContent = 'Ready';
+                }
+                
+                // Hide the API key input section since we have it from environment
+                if (window.electronAPI) {
+                    const apiKeySection = document.querySelector('.api-key-input');
+                    if (apiKeySection) {
+                        apiKeySection.style.display = 'none';
+                    }
+                }
             }
         }
 
@@ -984,6 +1354,10 @@
                 getMicrophones();
                 await populateVirtualOutputDevices();
                 updateVirtualMicStatus();
+                
+                // Initialize transcription UI
+                await loadSavedApiKey();
+                updateTranscriptionStatus('Stopped', false);
                 
                 // Check virtual mic status periodically
                 setInterval(updateVirtualMicStatus, 1000);
