@@ -1194,7 +1194,8 @@
                 
                 do {
                     pageCount++;
-                    console.log(`Fetching page ${pageCount}...`);
+                    statusText.textContent = `Loading voices... (page ${pageCount})`;
+                    console.log(`Fetching page ${pageCount}${nextPageToken ? ' with token: ' + nextPageToken.substring(0, 20) + '...' : ' (first page)'}...`);
                     
                     // Build URL with query parameters
                     const url = new URL('https://api.elevenlabs.io/v2/voices');
@@ -1202,6 +1203,8 @@
                     if (nextPageToken) {
                         url.searchParams.set('next_page_token', nextPageToken);
                     }
+                    
+                    console.log(`Request URL: ${url.toString()}`);
                     
                     const response = await fetch(url.toString(), {
                         headers: {
@@ -1211,7 +1214,7 @@
                     });
                     
                     if (!response.ok) {
-                        throw new Error(`Failed to fetch voices: ${response.status} ${response.statusText}`);
+                        throw new Error(`Failed to fetch voices page ${pageCount}: ${response.status} ${response.statusText}`);
                     }
                     
                     const data = await response.json();
@@ -1219,13 +1222,20 @@
                     allVoices = allVoices.concat(pageVoices);
                     
                     console.log(`Page ${pageCount}: ${pageVoices.length} voices, total so far: ${allVoices.length}`);
+                    console.log(`Has more pages: ${data.has_more}, Next token: ${data.next_page_token ? 'present' : 'null'}`);
                     
-                    // Check if there are more pages
+                    // Update the next page token from response
                     nextPageToken = data.next_page_token;
                     
                     // Safety check to prevent infinite loops
                     if (pageCount > 20) {
                         console.warn('Reached maximum page limit (20), stopping pagination');
+                        break;
+                    }
+                    
+                    // Additional safety: if no voices returned, stop
+                    if (pageVoices.length === 0) {
+                        console.log('No voices returned in this page, stopping pagination');
                         break;
                     }
                     
