@@ -400,6 +400,8 @@
             <div id="voiceDetails" style="display: none; background: rgba(0, 122, 255, 0.05); border: 1px solid rgba(0, 122, 255, 0.2); border-radius: 4px; padding: 8px; font-size: 11px; margin-top: 8px;">
                 <div style="margin-bottom: 4px;"><strong>Voice ID:</strong> <span id="selectedVoiceId">-</span></div>
                 <div style="margin-bottom: 4px;"><strong>Language:</strong> <span id="selectedVoiceLanguage">-</span></div>
+                <div style="margin-bottom: 4px;"><strong>Category:</strong> <span id="selectedVoiceCategory">-</span></div>
+                <div id="voiceLabelsContainer" style="margin-bottom: 4px;"></div>
                 <div><strong>Description:</strong> <span id="selectedVoiceDescription">-</span></div>
             </div>
         </div>
@@ -1233,7 +1235,17 @@
             const voicesByLanguage = {};
             
             availableVoices.forEach(voice => {
-                const language = voice.language || 'Unknown';
+                // Try to get language from multiple sources
+                let language = voice.language || 
+                             (voice.labels && voice.labels.language) || 
+                             (voice.fine_tuning && voice.fine_tuning.language) ||
+                             'Unknown';
+                
+                // Capitalize language name
+                if (language !== 'Unknown') {
+                    language = language.charAt(0).toUpperCase() + language.slice(1);
+                }
+                
                 if (!voicesByLanguage[language]) {
                     voicesByLanguage[language] = [];
                 }
@@ -1254,7 +1266,25 @@
                     .forEach(voice => {
                         const option = document.createElement('option');
                         option.value = voice.voice_id;
-                        option.textContent = `${voice.name} (${voice.voice_id.substring(0, 8)}...)`;
+                        
+                        // Build display text with labels
+                        let displayText = voice.name;
+                        const labels = voice.labels || {};
+                        
+                        // Add key characteristics from labels
+                        const characteristics = [];
+                        if (labels.gender) characteristics.push(labels.gender);
+                        if (labels.age) characteristics.push(labels.age);
+                        if (labels.accent) characteristics.push(labels.accent);
+                        if (labels.descriptive || labels.description) {
+                            characteristics.push(labels.descriptive || labels.description);
+                        }
+                        
+                        if (characteristics.length > 0) {
+                            displayText += ` (${characteristics.join(', ')})`;
+                        }
+                        
+                        option.textContent = displayText;
                         option.dataset.voice = JSON.stringify(voice);
                         langGroup.appendChild(option);
                     });
@@ -1292,11 +1322,55 @@
             const voiceDetails = document.getElementById('voiceDetails');
             const voiceIdEl = document.getElementById('selectedVoiceId');
             const voiceLanguageEl = document.getElementById('selectedVoiceLanguage');
+            const voiceCategoryEl = document.getElementById('selectedVoiceCategory');
+            const voiceLabelsContainer = document.getElementById('voiceLabelsContainer');
             const voiceDescriptionEl = document.getElementById('selectedVoiceDescription');
             
             if (voice) {
                 voiceIdEl.textContent = voice.voice_id;
-                voiceLanguageEl.textContent = voice.language || 'Unknown';
+                voiceLanguageEl.textContent = voice.language || (voice.labels && voice.labels.language) || 'Unknown';
+                voiceCategoryEl.textContent = voice.category || 'Unknown';
+                
+                // Display labels in a formatted way
+                const labels = voice.labels || {};
+                voiceLabelsContainer.innerHTML = '';
+                
+                if (Object.keys(labels).length > 0) {
+                    const labelsDiv = document.createElement('div');
+                    labelsDiv.innerHTML = '<strong>Characteristics:</strong>';
+                    
+                    const labelsList = document.createElement('div');
+                    labelsList.style.marginLeft = '10px';
+                    labelsList.style.marginTop = '2px';
+                    
+                    // Display key labels
+                    const labelOrder = ['gender', 'age', 'accent', 'descriptive', 'description', 'use_case', 'language'];
+                    
+                    labelOrder.forEach(key => {
+                        if (labels[key] && key !== 'language') { // Skip language as it's shown above
+                            const labelItem = document.createElement('div');
+                            labelItem.style.fontSize = '10px';
+                            labelItem.style.color = '#555';
+                            labelItem.innerHTML = `<strong>${key.replace('_', ' ')}:</strong> ${labels[key]}`;
+                            labelsList.appendChild(labelItem);
+                        }
+                    });
+                    
+                    // Add any remaining labels not in the ordered list
+                    Object.keys(labels).forEach(key => {
+                        if (!labelOrder.includes(key) && labels[key]) {
+                            const labelItem = document.createElement('div');
+                            labelItem.style.fontSize = '10px';
+                            labelItem.style.color = '#555';
+                            labelItem.innerHTML = `<strong>${key.replace('_', ' ')}:</strong> ${labels[key]}`;
+                            labelsList.appendChild(labelItem);
+                        }
+                    });
+                    
+                    labelsDiv.appendChild(labelsList);
+                    voiceLabelsContainer.appendChild(labelsDiv);
+                }
+                
                 voiceDescriptionEl.textContent = voice.description || voice.name || 'No description available';
                 voiceDetails.style.display = 'block';
             } else {
