@@ -21,13 +21,21 @@ A powerful Electron app that creates a virtual microphone with real-time audio p
    cd voice-conversion
    ```
 
-2. Install dependencies:
+2. Set up environment variables:
+   ```bash
+   cp .env.example .env
+   # Edit .env and add your API keys:
+   # - SONIOX_API_KEY: Your Soniox real-time transcription API key
+   # - ELEVENLABS_API_KEY: Your ElevenLabs text-to-speech API key
+   ```
+
+3. Install dependencies:
    ```bash
    brew install blackhole-2ch # reboot after this one!
    npm install
    ```
 
-3. Run the app:
+4. Run the app:
    ```bash
    npm start
    ```
