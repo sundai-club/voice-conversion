@@ -207,6 +207,40 @@
             background: #d32f2f;
         }
 
+        .passthrough-btn {
+            background: #28a745;
+            margin-top: 4px;
+        }
+
+        .passthrough-btn:hover {
+            background: #218838;
+        }
+
+        .passthrough-btn.stop {
+            background: #dc3545;
+        }
+
+        .passthrough-btn.stop:hover {
+            background: #c82333;
+        }
+
+        .voice-conversion-btn {
+            background: #28a745;
+            margin-top: 4px;
+        }
+
+        .voice-conversion-btn:hover:not(:disabled) {
+            background: #218838;
+        }
+
+        .voice-conversion-btn.stop {
+            background: #dc3545;
+        }
+
+        .voice-conversion-btn.stop:hover {
+            background: #c82333;
+        }
+
         .transcription-section {
             margin-top: 16px;
             padding-top: 12px;
@@ -322,8 +356,12 @@
             </select>
         </div>
         
-        <button id="virtualMicBtn" class="virtual-mic-btn" onclick="toggleVirtualMic()">
-            Start Virtual Microphone
+        <button id="passThroughBtn" class="virtual-mic-btn passthrough-btn" onclick="togglePassThrough()">
+            1. Start Pass-Through Audio
+        </button>
+        
+        <button id="virtualMicBtn" class="virtual-mic-btn voice-conversion-btn" onclick="toggleVirtualMic()" disabled>
+            2. Start Voice Conversion
         </button>
         
         <div class="setup-info">
@@ -435,6 +473,8 @@
         let availableVoices = [];
         let selectedVoiceId = localStorage.getItem('selectedVoiceId') || 'JBFqnCBsd6RMkjVDRZzb'; // Load saved voice or default
         let debugBeepsEnabled = true; // Default to enabled
+        let passThroughActive = false;
+        let passThroughMicrophone = null;
 
         // Function to detect virtual audio output devices
         async function getVirtualOutputDevices() {
@@ -1076,6 +1116,216 @@
             }
         }
 
+        // Pass-Through Microphone Class
+        class PassThroughMicrophone {
+            constructor() {
+                this.isActive = false;
+                this.inputStream = null;
+                this.audioContext = null;
+                this.sourceNode = null;
+                this.beepNode = null;
+                this.beepGainNode = null;
+                this.beepInterval = null;
+                this.destinationNode = null;
+                this.outputStream = null;
+                this.outputAudio = null;
+            }
+
+            async initialize() {
+                try {
+                    console.log('Initializing PassThroughMicrophone...');
+                    return true;
+                } catch (error) {
+                    console.error('PassThroughMicrophone initialization error:', error);
+                    return false;
+                }
+            }
+
+            async start(deviceId, outputDeviceId = null) {
+                if (this.isActive) {
+                    await this.stop();
+                }
+
+                try {
+                    console.log('Starting pass-through microphone with device:', deviceId);
+                    console.log('Output device:', outputDeviceId);
+                    
+                    // Get input stream from selected microphone
+                    const constraints = {
+                        audio: {
+                            deviceId: deviceId ? { exact: deviceId } : undefined,
+                            sampleRate: 44100,
+                            channelCount: 1,
+                            echoCancellation: false,
+                            noiseSuppression: false,
+                            autoGainControl: false
+                        }
+                    };
+
+                    this.inputStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    console.log('Got input stream for pass-through:', this.inputStream);
+                    
+                    // Create AudioContext
+                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                        sampleRate: 44100,
+                        latencyHint: 'interactive'
+                    });
+
+                    console.log('AudioContext created for pass-through, sample rate:', this.audioContext.sampleRate);
+                    
+                    // Create source node from input stream
+                    this.sourceNode = this.audioContext.createMediaStreamSource(this.inputStream);
+                    console.log('Source node created for pass-through');
+
+                    // Create beep generator for debug beeps (if enabled)
+                    this.beepNode = this.audioContext.createOscillator();
+                    this.beepGainNode = this.audioContext.createGain();
+                    
+                    this.beepNode.frequency.setValueAtTime(800, this.audioContext.currentTime);
+                    this.beepNode.type = 'sine';
+                    this.beepGainNode.gain.setValueAtTime(0, this.audioContext.currentTime);
+                    
+                    this.beepNode.connect(this.beepGainNode);
+                    this.beepNode.start();
+
+                    // Create destination for the output stream
+                    this.destinationNode = this.audioContext.createMediaStreamDestination();
+                    
+                    // Connect source directly to destination (pass-through)
+                    this.sourceNode.connect(this.destinationNode);
+                    this.beepGainNode.connect(this.destinationNode);
+                    
+                    console.log('Audio routing established for pass-through');
+
+                    // Get the output stream
+                    this.outputStream = this.destinationNode.stream;
+                    console.log('Output stream created for pass-through:', this.outputStream);
+
+                    // Create audio element and set up virtual microphone
+                    this.outputAudio = new Audio();
+                    this.outputAudio.srcObject = this.outputStream;
+                    this.outputAudio.muted = true;
+                    
+                    await this.outputAudio.play();
+                    console.log('Pass-through audio element started');
+
+                    this.isActive = true;
+
+                    // Start debug beeps if enabled
+                    if (debugBeepsEnabled) {
+                        this.startBeepScheduling();
+                    }
+
+                    console.log('Pass-through microphone started successfully');
+                    return true;
+
+                } catch (error) {
+                    console.error('Error starting pass-through microphone:', error);
+                    await this.stop();
+                    return false;
+                }
+            }
+
+            async stop() {
+                console.log('Stopping pass-through microphone...');
+                
+                try {
+                    this.isActive = false;
+
+                    // Stop beep scheduling
+                    this.stopBeepScheduling();
+
+                    // Stop output audio
+                    if (this.outputAudio) {
+                        this.outputAudio.pause();
+                        this.outputAudio.srcObject = null;
+                        this.outputAudio = null;
+                    }
+
+                    // Stop oscillator
+                    if (this.beepNode) {
+                        try {
+                            this.beepNode.stop();
+                        } catch (e) {
+                            // Oscillator might already be stopped
+                        }
+                        this.beepNode = null;
+                    }
+
+                    // Disconnect audio nodes
+                    if (this.sourceNode) {
+                        this.sourceNode.disconnect();
+                        this.sourceNode = null;
+                    }
+
+                    if (this.beepGainNode) {
+                        this.beepGainNode.disconnect();
+                        this.beepGainNode = null;
+                    }
+
+                    if (this.destinationNode) {
+                        this.destinationNode = null;
+                    }
+
+                    // Close AudioContext
+                    if (this.audioContext && this.audioContext.state !== 'closed') {
+                        await this.audioContext.close();
+                        this.audioContext = null;
+                    }
+
+                    // Stop input stream
+                    if (this.inputStream) {
+                        this.inputStream.getTracks().forEach(track => {
+                            track.stop();
+                            console.log('Stopped input track:', track.label);
+                        });
+                        this.inputStream = null;
+                    }
+
+                    console.log('Pass-through microphone stopped successfully');
+
+                } catch (error) {
+                    console.error('Error stopping pass-through microphone:', error);
+                }
+            }
+
+            startBeepScheduling() {
+                if (this.beepInterval) {
+                    clearInterval(this.beepInterval);
+                }
+                
+                this.beepInterval = setInterval(() => {
+                    if (this.isActive && this.beepGainNode && debugBeepsEnabled) {
+                        this.playBeep();
+                    }
+                }, 3000);
+            }
+
+            stopBeepScheduling() {
+                if (this.beepInterval) {
+                    clearInterval(this.beepInterval);
+                    this.beepInterval = null;
+                }
+            }
+
+            playBeep() {
+                if (!this.beepGainNode || !this.audioContext) return;
+                
+                try {
+                    const now = this.audioContext.currentTime;
+                    this.beepGainNode.gain.setValueAtTime(0, now);
+                    this.beepGainNode.gain.linearRampToValueAtTime(0.1, now + 0.01);
+                    this.beepGainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+                } catch (error) {
+                    console.error('Beep error:', error);
+                }
+            }
+
+            isRunning() {
+                return this.isActive;
+            }
+        }
+
         // Helper functions for transcription UI
         function updateTranscriptionStatus(status, isActive) {
             const statusText = document.getElementById('transcriptionStatusText');
@@ -1580,13 +1830,23 @@
                 localStorage.setItem('debugBeepsEnabled', debugBeepsEnabled);
                 console.log('Debug beeps', debugBeepsEnabled ? 'enabled' : 'disabled');
                 
-                // If turning off beeps while virtual mic is active, stop current beeps
-                if (!debugBeepsEnabled && virtualMicrophone && virtualMicrophone.isRunning()) {
-                    virtualMicrophone.stopBeepScheduling();
+                // If turning off beeps while microphones are active, stop current beeps
+                if (!debugBeepsEnabled) {
+                    if (virtualMicrophone && virtualMicrophone.isRunning()) {
+                        virtualMicrophone.stopBeepScheduling();
+                    }
+                    if (passThroughMicrophone && passThroughMicrophone.isRunning()) {
+                        passThroughMicrophone.stopBeepScheduling();
+                    }
                 }
-                // If turning on beeps while virtual mic is active, start beeps
-                else if (debugBeepsEnabled && virtualMicrophone && virtualMicrophone.isRunning()) {
-                    virtualMicrophone.startBeepScheduling();
+                // If turning on beeps while microphones are active, start beeps
+                else if (debugBeepsEnabled) {
+                    if (virtualMicrophone && virtualMicrophone.isRunning()) {
+                        virtualMicrophone.startBeepScheduling();
+                    }
+                    if (passThroughMicrophone && passThroughMicrophone.isRunning()) {
+                        passThroughMicrophone.startBeepScheduling();
+                    }
                 }
             });
         }
@@ -1609,6 +1869,13 @@
                         return;
                     }
                     
+                    // Require pass-through to be active first
+                    if (!passThroughActive) {
+                        alert('Please start Pass-Through Audio first');
+                        btn.disabled = false;
+                        return;
+                    }
+                    
                     statusText.textContent = 'Virtual Mic: Starting...';
                     
                     // Get selected virtual output device
@@ -1619,9 +1886,9 @@
                     
                     if (success) {
                         virtualMicActive = true;
-                        btn.textContent = 'Stop Virtual Microphone';
+                        btn.textContent = '2. Stop Voice Conversion';
                         btn.classList.add('stop');
-                        statusText.textContent = 'Virtual Mic: Active';
+                        statusText.textContent = 'Virtual Mic: Voice Conversion Active';
                         statusDot.classList.remove('inactive');
                         statusDot.classList.add('active');
                     } else {
@@ -1635,11 +1902,13 @@
                     await virtualMicrophone.stop();
                     
                     virtualMicActive = false;
-                    btn.textContent = 'Start Virtual Microphone';
+                    btn.textContent = '2. Start Voice Conversion';
                     btn.classList.remove('stop');
-                    statusText.textContent = 'Virtual Mic: Stopped';
-                    statusDot.classList.remove('active');
-                    statusDot.classList.add('inactive');
+                    // Since pass-through is still active, show that status
+                    statusText.textContent = 'Virtual Mic: Pass-Through Active';
+                    // Keep the dot active since pass-through is still running
+                    statusDot.classList.remove('inactive');
+                    statusDot.classList.add('active');
                 }
             } catch (error) {
                 console.error('Virtual microphone error:', error);
@@ -1656,10 +1925,108 @@
                 
                 // Reset state on error
                 virtualMicActive = false;
-                btn.textContent = 'Start Virtual Microphone';
+                btn.textContent = '2. Start Voice Conversion';
                 btn.classList.remove('stop');
                 statusDot.classList.remove('active');
                 statusDot.classList.add('inactive');
+            }
+            
+            btn.disabled = false;
+        }
+
+        // Pass-through microphone control functions
+        async function togglePassThrough() {
+            const btn = document.getElementById('passThroughBtn');
+            
+            btn.disabled = true;
+            
+            try {
+                console.log('togglePassThrough called, current state:', passThroughActive);
+                if (!passThroughActive) {
+                    if (!selectedMicrophoneId) {
+                        alert('Please select a microphone first');
+                        btn.disabled = false;
+                        return;
+                    }
+                    
+                    // Get selected virtual output device
+                    const outputSelect = document.getElementById('virtualOutputSelect');
+                    selectedVirtualOutputId = outputSelect.value || null;
+                    
+                    const success = await passThroughMicrophone.start(selectedMicrophoneId, selectedVirtualOutputId);
+                    
+                    if (success) {
+                        passThroughActive = true;
+                        btn.textContent = '1. Stop Pass-Through Audio';
+                        btn.classList.add('stop');
+                        
+                        // Update virtual mic status to show pass-through is active
+                        const statusText = document.getElementById('virtualMicStatusText');
+                        const statusDot = document.getElementById('virtualMicDot');
+                        statusText.textContent = 'Virtual Mic: Pass-Through Active';
+                        statusDot.classList.remove('inactive');
+                        statusDot.classList.add('active');
+                        
+                        // Enable voice conversion button
+                        const virtualMicBtn = document.getElementById('virtualMicBtn');
+                        virtualMicBtn.disabled = false;
+                    } else {
+                        // Revert button state on failure
+                        setTimeout(() => {
+                            btn.textContent = '1. Start Pass-Through Audio';
+                        }, 2000);
+                    }
+                } else {
+                    // Stop voice conversion first if it's running
+                    if (virtualMicActive && virtualMicrophone) {
+                        await virtualMicrophone.stop();
+                        virtualMicActive = false;
+                        const virtualMicBtn = document.getElementById('virtualMicBtn');
+                        const statusText = document.getElementById('virtualMicStatusText');
+                        const statusDot = document.getElementById('virtualMicDot');
+                        virtualMicBtn.textContent = '2. Start Voice Conversion';
+                        virtualMicBtn.classList.remove('stop');
+                        statusText.textContent = 'Virtual Mic: Stopped';
+                        statusDot.classList.remove('active');
+                        statusDot.classList.add('inactive');
+                    }
+                    
+                    await passThroughMicrophone.stop();
+                    
+                    passThroughActive = false;
+                    btn.textContent = '1. Start Pass-Through Audio';
+                    btn.classList.remove('stop');
+                    
+                    // Reset virtual mic status when pass-through stops
+                    const statusText = document.getElementById('virtualMicStatusText');
+                    const statusDot = document.getElementById('virtualMicDot');
+                    statusText.textContent = 'Virtual Mic: Stopped';
+                    statusDot.classList.remove('active');
+                    statusDot.classList.add('inactive');
+                    
+                    // Disable voice conversion button
+                    const virtualMicBtn = document.getElementById('virtualMicBtn');
+                    virtualMicBtn.disabled = true;
+                }
+            } catch (error) {
+                console.error('Pass-through microphone error:', error);
+                alert(`Pass-through error: ${error.message}`);
+                
+                // Reset state on error
+                passThroughActive = false;
+                btn.textContent = '1. Start Pass-Through Audio';
+                btn.classList.remove('stop');
+                
+                // Reset virtual mic status on error
+                const statusText = document.getElementById('virtualMicStatusText');
+                const statusDot = document.getElementById('virtualMicDot');
+                statusText.textContent = 'Virtual Mic: Stopped';
+                statusDot.classList.remove('active');
+                statusDot.classList.add('inactive');
+                
+                // Disable voice conversion button on error
+                const virtualMicBtn = document.getElementById('virtualMicBtn');
+                virtualMicBtn.disabled = true;
             }
             
             btn.disabled = false;
@@ -1676,17 +2043,24 @@
                     virtualMicActive = isActive;
                     
                     if (isActive) {
-                        btn.textContent = 'Stop Virtual Microphone';
+                        btn.textContent = '2. Stop Voice Conversion';
                         btn.classList.add('stop');
-                        statusText.textContent = 'Virtual Mic: Active';
+                        statusText.textContent = 'Virtual Mic: Voice Conversion Active';
                         statusDot.classList.remove('inactive');
                         statusDot.classList.add('active');
                     } else {
-                        btn.textContent = 'Start Virtual Microphone';
+                        btn.textContent = '2. Start Voice Conversion';
                         btn.classList.remove('stop');
-                        statusText.textContent = 'Virtual Mic: Stopped';
-                        statusDot.classList.remove('active');
-                        statusDot.classList.add('inactive');
+                        // Check if pass-through is still active
+                        if (passThroughActive) {
+                            statusText.textContent = 'Virtual Mic: Pass-Through Active';
+                            statusDot.classList.remove('inactive');
+                            statusDot.classList.add('active');
+                        } else {
+                            statusText.textContent = 'Virtual Mic: Stopped';
+                            statusDot.classList.remove('active');
+                            statusDot.classList.add('inactive');
+                        }
                     }
                 }
             } catch (error) {
@@ -1810,6 +2184,11 @@
                 virtualMicrophone = new VirtualMicrophone();
                 const initSuccess = await virtualMicrophone.initialize();
                 console.log('Virtual microphone initialized:', initSuccess);
+                
+                // Initialize pass-through microphone
+                passThroughMicrophone = new PassThroughMicrophone();
+                const passThroughInitSuccess = await passThroughMicrophone.initialize();
+                console.log('Pass-through microphone initialized:', passThroughInitSuccess);
                 
                 getMicrophones();
                 await populateVirtualOutputDevices();
