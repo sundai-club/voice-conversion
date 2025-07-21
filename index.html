@@ -1024,7 +1024,7 @@
                                 }
                             };
                             
-                            console.log('Beep triggered at', currentTime);
+                            console.log('🔊 BEEP (Voice Conversion) at', currentTime);
                             
                         } catch (error) {
                             console.error('Error creating individual beep:', error);
@@ -1316,6 +1316,9 @@
                     this.beepGainNode.gain.setValueAtTime(0, now);
                     this.beepGainNode.gain.linearRampToValueAtTime(0.1, now + 0.01);
                     this.beepGainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+                    
+                    // Output beep to console similar to voice conversion
+                    console.log('🔊 BEEP (Pass-Through Audio) at', now);
                 } catch (error) {
                     console.error('Beep error:', error);
                 }
